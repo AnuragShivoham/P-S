@@ -80,7 +80,7 @@ async function callClaudeJSON(system, userMsg, history = [], maxTokens = 2000) {
       const keys = Object.keys(parsed);
       const arrayKeys = keys.filter(k => Array.isArray(parsed[k]));
       
-      if (arrayKeys.length === 1) {
+      if (arrayKeys.length === 1 && ['milestones', 'tasks', 'items'].includes(arrayKeys[0])) {
         const arrayKey = arrayKeys[0];
         console.log(`[JSON Mode] Auto-unwrapped single array from key: ${arrayKey}`);
         return parsed[arrayKey];
