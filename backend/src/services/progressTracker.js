@@ -34,7 +34,7 @@ function createProject(userId, rawGoal) {
   return hydrateProject(db.prepare('SELECT * FROM projects WHERE id=?').get(id));
 }
 function getProject(id)       { return hydrateProject(db.prepare('SELECT * FROM projects WHERE id=?').get(id)); }
-function getUserProjects(uid)  { return db.prepare('SELECT id,title,status,progress_pct,created_at FROM projects WHERE user_id=?').all(uid); }
+function getUserProjects(uid)  { return db.prepare('SELECT id,title,status,progress_pct,completed_tasks,total_tasks,created_at FROM projects WHERE user_id=? ORDER BY created_at DESC').all(uid); }
 
 function activateProject(id, ex) {
   db.prepare(`UPDATE projects SET title=?,tech_stack=?,scope=?,deadline_days=?,skill_level=?,deliverables=?,status='active',updated_at=? WHERE id=?`)
@@ -155,6 +155,20 @@ function getResumeState(projectId) {
   return { project, milestone, task };
 }
 
+// DELETE
+function deleteProject(projectId) {
+  db.prepare(`DELETE FROM qa_reviews WHERE task_id IN (SELECT id FROM tasks WHERE milestone_id IN (SELECT id FROM milestones WHERE project_id=?))`).run(projectId);
+  db.prepare('DELETE FROM automation_suggestions WHERE project_id=?').run(projectId);
+  db.prepare('DELETE FROM conversation_turns WHERE project_id=?').run(projectId);
+  db.prepare('DELETE FROM workspace_files WHERE project_id=?').run(projectId);
+  db.prepare('DELETE FROM command_logs WHERE project_id=?').run(projectId);
+  db.prepare('DELETE FROM progress_snapshots WHERE project_id=?').run(projectId);
+  
+  db.prepare(`DELETE FROM tasks WHERE milestone_id IN (SELECT id FROM milestones WHERE project_id=?)`).run(projectId);
+  db.prepare('DELETE FROM milestones WHERE project_id=?').run(projectId);
+  db.prepare('DELETE FROM projects WHERE id=?').run(projectId);
+}
+
 module.exports = {
   createUser, getUser, getUserByEmail,
   createProject, getProject, getUserProjects, activateProject, setClarification,
@@ -165,4 +179,5 @@ module.exports = {
   saveAutomations, getProjectAutomations,
   logTurn, getConversation, getTaskConversation,
   getResumeState,
+  deleteProject,
 };

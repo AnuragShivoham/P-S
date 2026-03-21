@@ -24,6 +24,16 @@ class WorkspaceService {
   }
 
   /**
+   * Delete entire project workspace directory
+   */
+  static deleteProjectWorkspace(projectId) {
+    const projectPath = path.join(BASE_WORKSPACE, projectId);
+    if (fs.existsSync(projectPath)) {
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  }
+
+  /**
    * Get project workspace path with validation
    */
   static getProjectPath(projectId) {
@@ -53,7 +63,7 @@ class WorkspaceService {
   }
 
   /**
-   * List files in project directory
+   * List files in project directory recursively
    */
   static listFiles(projectId, dirPath = '') {
     const projectPath = this.getProjectPath(projectId);
@@ -63,17 +73,30 @@ class WorkspaceService {
       return [];
     }
 
-    try {
-      const entries = fs.readdirSync(fullPath, { withFileTypes: true });
-      return entries.map(entry => ({
-        name: entry.name,
-        type: entry.isDirectory() ? 'directory' : 'file',
-        path: path.join(dirPath, entry.name),
-        size: entry.isFile() ? fs.statSync(path.join(fullPath, entry.name)).size : null,
-      }));
-    } catch (err) {
-      throw new Error(`Failed to list files: ${err.message}`);
-    }
+    const walk = (currentPath, relativePath) => {
+      try {
+        const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+        return entries.map(entry => {
+          const isDir = entry.isDirectory();
+          const nodePath = path.posix.join(relativePath, entry.name);
+          const fullNodePath = path.join(currentPath, entry.name);
+          
+          return {
+            name: entry.name,
+            type: isDir ? 'directory' : 'file',
+            isDir: isDir, // explicitly added for IDE frontend compatibility
+            path: nodePath,
+            size: isDir ? null : fs.statSync(fullNodePath).size,
+            children: isDir ? walk(fullNodePath, nodePath) : undefined,
+          };
+        });
+      } catch (err) {
+        console.error('Failed walking directory:', err);
+        return [];
+      }
+    };
+
+    return walk(fullPath, dirPath || '');
   }
 
   /**
@@ -130,18 +153,44 @@ class WorkspaceService {
   /**
    * Delete file
    */
-  static deleteFile(projectId, filePath) {
+  static deleteFile(projectId, filePath, isAuthorized = false) {
     const fullPath = this.validateFilePath(projectId, filePath);
 
     if (!fs.existsSync(fullPath)) {
-      throw new Error('File not found');
+      throw new Error(`File or directory not found: ${filePath}`);
+    }
+
+    const protectedPaths = ['src', 'backend', 'routes', 'services', 'db', 'package.json', '.env', ''];
+    let normalizedPath = filePath.replace(/^[\/\\]+/, '');
+    if (normalizedPath === '.') normalizedPath = '';
+    
+    const isProtected = normalizedPath === '' || protectedPaths.some(p => p !== '' && (normalizedPath === p || normalizedPath.startsWith(p + '/')));
+    
+    if (isProtected && !isAuthorized) {
+      throw new Error(`Deletion of protected path '${filePath}' denied. Request authorization from AI Mentor first.`);
     }
 
     try {
-      fs.unlinkSync(fullPath);
+      fs.rmSync(fullPath, { recursive: true, force: true });
       return { path: filePath, deleted: true };
     } catch (err) {
-      throw new Error(`Failed to delete file: ${err.message}`);
+      throw new Error(`Failed to safely delete file ${filePath}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Rename file or directory
+   */
+  static renameFile(projectId, oldPath, newPath) {
+    const fullOldPath = this.validateFilePath(projectId, oldPath);
+    const fullNewPath = this.validateFilePath(projectId, newPath);
+    if (!fs.existsSync(fullOldPath)) throw new Error('Source file not found');
+    if (fs.existsSync(fullNewPath)) throw new Error('Destination file already exists');
+    try {
+      fs.renameSync(fullOldPath, fullNewPath);
+      return { oldPath, newPath, renamed: true };
+    } catch (err) {
+      throw new Error(`Failed to rename file: ${err.message}`);
     }
   }
 
