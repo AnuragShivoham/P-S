@@ -12,10 +12,7 @@ export default function GoalPage() {
   const [loading, setLoad] = useState(false);
   const [error, setError]  = useState('');
 
-  // Redirect if project already exists
-  useEffect(() => {
-    if (project) navigate('/dashboard');
-  }, [project, navigate]);
+  // (Removed legacy blocker that prevented creating a new project if one was active)
 
   // If no user at all, redirect to login (since we removed legacy register)
   useEffect(() => {

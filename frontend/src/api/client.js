@@ -31,6 +31,7 @@ export const api = {
   debugLog: (data) => post('/debug/log', data),
   getUserProjects: (uid) => get(`/users/${uid}/projects`),
   resumeProject: (id) => get(`/projects/${id}/resume`),
+  deleteProject: (id) => req('DELETE', `/projects/${id}`),
   getMilestones: (pid) => get(`/projects/${pid}/milestones`),
   getConversation: (pid) => get(`/projects/${pid}/conversation`),
   getAutomations: (pid) => get(`/projects/${pid}/automations`),
@@ -50,7 +51,7 @@ export const api = {
   deleteFile: (path) => req('DELETE', `/fs/file?path=${encodeURIComponent(path)}`),
   renameFile: (oldPath, newPath) => req('PUT', '/fs/rename', { oldPath, newPath }),
   gitClone: (url, targetDir) => post('/fs/git-clone', { url, targetDir }),
-  authorizeDeletion: () => post('/fs/authorize-deletion'),
+  authorizeDeletion: (projectId, path) => post('/fs/authorize-deletion', { projectId, path }),
 
   // Auth
   sendOtp: (email) => post('/auth/send-otp', { email }),
