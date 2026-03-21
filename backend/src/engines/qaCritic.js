@@ -14,9 +14,23 @@ RULES:
 OUTPUT: ONLY valid JSON.
 {"verdict":"pass","score":0.85,"passed_checks":["Server starts","GET /health returns 200"],"failed_checks":[],"corrections":[],"feedback_text":"Implementation correct."}`;
 
-async function reviewSubmission(task, submissionText, attemptNumber) {
+function formatTree(nodes, indent = '') {
+  if (!nodes || !nodes.length) return '';
+  return nodes.map(n => {
+    const icon = n.type === 'directory' ? '📁 ' : '📄 ';
+    const childrenStr = n.children ? formatTree(n.children, indent + '  ') : '';
+    return `${indent}${icon}${n.name}\n${childrenStr}`;
+  }).join('');
+}
+
+async function reviewSubmission(task, submissionText, attemptNumber, treeNodes = []) {
   const strictness = attemptNumber >= 3 ? 'strict — multiple attempts, be thorough' : 'standard — check core deliverable';
-  const msg = `Task: ${task.title}\nDescription: ${task.description}\nConcepts: ${(task.concepts_taught||[]).join(', ')}\n\nSubmission (attempt ${attemptNumber}, ${strictness}):\n${submissionText}`;
+  let msg = `Task: ${task?.title || 'Unknown'}\nDescription: ${task?.description || 'N/A'}\nConcepts: ${(task?.concepts_taught||[]).join(', ')}\n\nSubmission (attempt ${attemptNumber}, ${strictness}):\n${submissionText}`;
+  
+  if (treeNodes && treeNodes.length > 0) {
+    msg += `\n\n--- ACTUAL WORKSPACE FILES ---\nThe IDE filesystem contains:\n${formatTree(treeNodes)}`;
+  }
+  
   const result = await callClaudeJSON(SYSTEM, msg, [], 1200);
   result.attempt_number = attemptNumber;
   return result;
