@@ -8,6 +8,7 @@ const taskPlanner       = require('../engines/taskPlanner');
 const guidedExecution   = require('../engines/guidedExecution');
 const qaCritic          = require('../engines/qaCritic');
 const automationAdvisor = require('../engines/automationAdvisor');
+const WorkspaceService  = require('../services/workspaceService');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Route Error]', e.message);
@@ -77,8 +78,9 @@ router.get('/users/:id', wrap(async (req, res) => {
 // GOAL SUBMISSION + CLARIFICATION
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/goals/submit', wrap(async (req, res) => {
-  const { user_id, raw_goal } = req.body;
-  if (!user_id || !raw_goal) return res.status(400).json({ error: 'user_id and raw_goal required' });
+  const { raw_goal } = req.body;
+  const user_id = req.user.id;
+  if (!raw_goal) return res.status(400).json({ error: 'raw_goal required' });
   if (raw_goal.trim().length < 20) return res.status(400).json({ error: 'Goal too vague — describe what you want to build, what tech, and by when' });
   if (!tracker.getUser(user_id)) return res.status(404).json({ error: 'User not found' });
 
@@ -108,6 +110,7 @@ router.post('/goals/clarify', wrap(async (req, res) => {
 
   const project = tracker.getProject(project_id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   if (project.status !== 'clarifying') return res.status(400).json({ error: 'Project is not in clarifying state' });
   if (project.clarification_round >= config.MAX_CLARIFY_ROUNDS) {
     return res.status(400).json({ error: 'Max clarification rounds reached. Resubmit with a more specific goal.' });
@@ -138,16 +141,6 @@ router.post('/goals/clarify', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // PROJECTS
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/projects/:id', wrap(async (req, res) => {
-  const p = tracker.getProject(req.params.id);
-  if (!p) return res.status(404).json({ error: 'Project not found' });
-  res.json(p);
-}));
-
-router.get('/users/:id/projects', wrap(async (req, res) => {
-  res.json(tracker.getUserProjects(req.params.id));
-}));
-
 router.get('/projects/latest', wrap(async (req, res) => {
   const userId = req.user.id;
   console.log(`[REHYDRATE] UID: ${userId} (${req.user.email})`);
@@ -173,6 +166,19 @@ router.get('/projects/latest', wrap(async (req, res) => {
   });
 }));
 
+router.get('/projects/:id', wrap(async (req, res) => {
+  if (req.params.id === 'latest') return; 
+  const p = tracker.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  res.json(p);
+}));
+
+router.get('/users/:id/projects', wrap(async (req, res) => {
+  if (req.params.id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  res.json(tracker.getUserProjects(req.params.id));
+}));
+
 router.get('/projects/:id/resume', wrap(async (req, res) => {
   const state = tracker.getResumeState(req.params.id);
   if (!state) return res.status(404).json({ error: 'Project not found' });
@@ -193,15 +199,38 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
   });
 }));
 
+router.delete('/projects/:id', wrap(async (req, res) => {
+  const p = tracker.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+
+  tracker.deleteProject(p.id);
+  try {
+    WorkspaceService.deleteProjectWorkspace(p.id);
+  } catch (e) {
+    console.error('[Delete Error] Workspace cleanup failed:', e.message);
+  }
+  res.json({ success: true });
+}));
+
 router.get('/projects/:id/milestones', wrap(async (req, res) => {
+  const p = tracker.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   res.json(tracker.getProjectMilestones(req.params.id));
 }));
 
 router.get('/projects/:id/conversation', wrap(async (req, res) => {
+  const p = tracker.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   res.json(tracker.getConversation(req.params.id, 100));
 }));
 
 router.get('/projects/:id/automations', wrap(async (req, res) => {
+  const p = tracker.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   res.json(tracker.getProjectAutomations(req.params.id));
 }));
 
@@ -246,8 +275,10 @@ router.post('/tasks/:id/ask', wrap(async (req, res) => {
   const project = ms ? tracker.getProject(ms.project_id) : null;
   const milestones = project ? tracker.getProjectMilestones(project.id) : [];
   const history = tracker.getTaskConversation(task.id, 10).map(t => ({ role: t.role, content: t.content }));
+  let treeNodes = [];
+  try { if (project) treeNodes = WorkspaceService.listFiles(project.id); } catch(e) {}
   
-  const guidance = await guidedExecution.getGuidance(task, question, history, activeFileContent, activeFilePath, project, milestones);
+  const guidance = await guidedExecution.getGuidance(task, question, history, activeFileContent, activeFilePath, project, milestones, treeNodes);
   
   if (project) {
     tracker.logTurn(project.id, 'user',   question, 'task_guidance', task.id);
@@ -265,7 +296,10 @@ router.post('/projects/:id/ask', wrap(async (req, res) => {
   const milestones = tracker.getProjectMilestones(project.id);
   const history = tracker.getConversation(project.id, 10).map(t => ({ role: t.role, content: t.content })).reverse();
   
-  const guidance = await guidedExecution.getGuidance(null, question, history, activeFileContent, activeFilePath, project, milestones);
+  let treeNodes = [];
+  try { treeNodes = WorkspaceService.listFiles(project.id); } catch(e) {}
+
+  const guidance = await guidedExecution.getGuidance(null, question, history, activeFileContent, activeFilePath, project, milestones, treeNodes);
   
   tracker.logTurn(project.id, 'user',   question, 'general_guidance');
   tracker.logTurn(project.id, 'mentor', guidance, 'general_guidance');
@@ -290,7 +324,10 @@ router.post('/tasks/submit', wrap(async (req, res) => {
   const milestone = tracker.getMilestone(task.milestone_id);
   const project   = tracker.getProject(milestone.project_id);
 
-  const qaResult = await qaCritic.reviewSubmission(task, submission_text, task.attempts);
+  let treeNodes = [];
+  try { if (project) treeNodes = WorkspaceService.listFiles(project.id); } catch(e) {}
+
+  const qaResult = await qaCritic.reviewSubmission(task, submission_text, task.attempts, treeNodes);
   const review   = tracker.saveQAReview(task_id, qaResult);
 
   tracker.logTurn(project.id, 'user',   submission_text,       'qa_feedback', task_id);
@@ -371,3 +408,6 @@ router.post('/debug/log', (req, res) => {
 });
 
 module.exports = router;
+
+
+

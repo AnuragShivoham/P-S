@@ -24,11 +24,32 @@ const HINT_SYSTEMS = [
   'AMIT-BODHIT hint level 3: Show exactly which line/function needs changing and why. Max 100 words. No complete answer.',
 ];
 
-async function getGuidance(task, userQuestion, history = [], activeFileContent = null, activeFilePath = null, project = null, milestones = []) {
-  let ctx = `Role: ${project?.user_role || 'Student'}\nProject: ${project?.title}\nProgress: ${project?.progress_pct}% (${project?.completed_tasks}/${project?.total_tasks} tasks)\n\nTask: ${task.title}\nDescription: ${task.description}\nConcepts: ${(task.concepts_taught||[]).join(', ')}\nCommands: ${JSON.stringify(task.commands||[])}`;
+function formatTree(nodes, indent = '') {
+  if (!nodes || !nodes.length) return '';
+  return nodes.map(n => {
+    const icon = n.type === 'directory' ? '📁 ' : '📄 ';
+    const childrenStr = n.children && n.children.length ? '\n' + formatTree(n.children, indent + '  ') : '';
+    return `${indent}${icon}${n.name}${childrenStr}`;
+  }).join('\n');
+}
+
+async function getGuidance(task, userQuestion, history = [], activeFileContent = null, activeFilePath = null, project = null, milestones = [], treeNodes = []) {
+  const stackList = project?.tech_stack ? (Array.isArray(project.tech_stack) ? project.tech_stack.join(', ') : project.tech_stack) : 'N/A';
+  let ctx = `Role: ${project?.user_role || 'Student'}
+Project Name: ${project?.title}
+Tech Stack: ${stackList}
+Progress: ${project?.progress_pct}% (${project?.completed_tasks}/${project?.total_tasks} tasks)
+Task: ${task?.title || 'General Chat'}
+Description: ${task?.description || 'N/A'}
+Concepts: ${(task?.concepts_taught||[]).join(', ')}
+Commands: ${JSON.stringify(task?.commands||[])}`;
   
   if (milestones.length) {
     ctx += `\n\nFull Milestone Plan:\n${milestones.map(m => `- ${m.title} [${m.status}]`).join('\n')}`;
+  }
+
+  if (treeNodes && treeNodes.length > 0) {
+    ctx += `\n\nCurrent Project File Structure:\n${formatTree(treeNodes)}`;
   }
 
   if (activeFileContent) {

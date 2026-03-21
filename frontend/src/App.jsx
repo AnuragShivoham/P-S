@@ -11,6 +11,7 @@ import DashboardPage from './pages/DashboardPage';
 import CompletePage from './pages/CompletePage';
 import IdePage from './pages/IdePage';
 import LoginPage from './pages/LoginPage';
+import ProjectsPage from './pages/ProjectsPage';
 
 function Header() {
   const location = useLocation();
@@ -23,7 +24,7 @@ function Header() {
 
   return (
     <header className="hdr">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/')}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/projects')}>
         <div className="logo">AMIT-BODHIT</div>
         <div className="logo-sub">AI Project Mentor</div>
       </div>
@@ -138,7 +139,9 @@ function AppInner() {
       <Header />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
+        <Route path="/" element={<Navigate to="/projects" replace />} />
+        <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
+        <Route path="/goal" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
         <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />

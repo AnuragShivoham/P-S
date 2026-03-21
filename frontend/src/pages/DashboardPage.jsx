@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useStore } from '../store';
@@ -48,6 +48,11 @@ function TaskPanel({ task, onSubmit, submitting }) {
   const [started, setStarted] = useState(task?.status === 'in_progress');
   const { setCurrentTask, chatLog, addChatMessage } = useStore();
   const navigate = useNavigate();
+
+  const chatEndRef = useRef(null);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatLog]);
 
   const handleStart = async () => {
     try { const r = await api.startTask(task.id); setCurrentTask(r.task); setStarted(true); }
@@ -151,15 +156,24 @@ function TaskPanel({ task, onSubmit, submitting }) {
             </button>
           </div>
           {chatLog.length > 0 && (
-            <div className="guidance fade-in" style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="guidance fade-in" style={{ maxHeight: 350, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingRight: 8 }}>
               {chatLog.map((m, i) => (
-                <div key={i} style={{ borderLeft: m.role === 'user' ? '2px solid var(--blue)' : '2px solid var(--green)', paddingLeft: 10 }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: m.role === 'user' ? 'var(--blue)' : 'var(--green)', marginBottom: 2 }}>
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: m.role === 'user' ? 'var(--blue)' : 'var(--green)', marginBottom: 4 }}>
                     {m.role === 'mentor' ? 'AI Mentor' : m.role === 'user' ? 'You' : 'System'}
                   </div>
-                  <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--tx-2)', whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                  <div style={{ 
+                    background: m.role === 'user' ? 'rgba(91, 138, 245, 0.15)' : 'var(--bg)', 
+                    border: '1px solid',
+                    borderColor: m.role === 'user' ? 'rgba(91, 138, 245, 0.3)' : 'var(--border)',
+                    borderRadius: 8, padding: '10px 14px', fontSize: 13, lineHeight: 1.5, color: 'var(--tx-2)', 
+                    whiteSpace: 'pre-wrap', maxWidth: '90%' 
+                  }}>
+                    {m.content}
+                  </div>
                 </div>
               ))}
+              <div ref={chatEndRef} />
             </div>
           )}
         </div>
@@ -239,7 +253,7 @@ function AutomationsTab({ automations = [] }) {
 // ─── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { project, milestones, currentTask, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
+  const { project, milestones, currentTask, chatLog, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
   const [tab, setTab] = useState('task');
   const [submitting, setSubm] = useState(false);
   const [error, setError] = useState('');

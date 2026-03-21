@@ -3,6 +3,27 @@ const router = express.Router();
 const WorkspaceService = require('../services/workspaceService');
 const db = require('../db/database');
 
+const authorizedDeletions = new Map();
+
+router.post('/authorize-deletion', (req, res) => {
+  try {
+    if (!req.user || !req.user.id) throw new Error("Authentication required");
+    const { projectId, path: targetPath } = req.body;
+    if (!projectId || targetPath === undefined) throw new Error("projectId and path required");
+
+    const normTarget = targetPath.replace(/^[\/\\]+/, '');
+    const expiry = Date.now() + 120000;
+    const key = `${req.user.id}:${projectId}`;
+    
+    authorizedDeletions.set(key, { expiry, path: normTarget });
+    
+    console.log(`[FS] Auth granted to ${key} for path '${normTarget}' until ${new Date(expiry).toISOString()}`);
+    res.json({ authorized: true, path: normTarget });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 function getUserProject(req, projectId) {
   if (projectId) {
     const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
@@ -99,10 +120,53 @@ router.delete('/file/:projectId/*', (req, res) => {
 
     const project = getUserProject(req, projectId);
 
-    const result = WorkspaceService.deleteFile(projectId, filePath);
+    const normReqPath = filePath.replace(/^[\/\\]+/, '');
+    let isAuthorized = false;
+    const key = `${req.user.id}:${projectId}`;
+    const authRecord = authorizedDeletions.get(key);
+
+    if (authRecord) {
+      if (Date.now() < authRecord.expiry) {
+        if (normReqPath === authRecord.path || normReqPath.startsWith(authRecord.path !== '' ? authRecord.path + '/' : '')) {
+          isAuthorized = true;
+          authorizedDeletions.delete(key);
+        }
+      } else {
+        authorizedDeletions.delete(key);
+      }
+    }
+
+    const result = WorkspaceService.deleteFile(projectId, filePath, isAuthorized);
+    console.log(JSON.stringify({ AUDIT: 'DELETE', timestamp: new Date().toISOString(), userId: req.user.id, projectId, filePath, result: 'SUCCESS' }));
     res.json(result);
   } catch (err) {
-    console.error('[FS] Delete error:', err.message);
+    console.log(JSON.stringify({ AUDIT: 'DELETE', timestamp: new Date().toISOString(), userId: req.user?.id, projectId: req.params.projectId, filePath: req.params[0], result: 'FAILED', reason: err.message }));
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /download/:projectId - Download workspace zip
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/download/:projectId', (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = getUserProject(req, projectId);
+    const workspacePath = WorkspaceService.getProjectPath(project.id);
+    
+    if (!require('fs').existsSync(workspacePath)) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    res.attachment(`${project.title.replace(/[^a-z0-9]/gi, '_') || 'workspace'}.zip`);
+    archive.pipe(res);
+    archive.directory(workspacePath, false);
+    archive.finalize();
+  } catch (err) {
+    console.error('[FS] Download error:', err.message);
     res.status(400).json({ error: err.message });
   }
 });
@@ -166,6 +230,135 @@ router.post('/file', (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[FS] Write error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/touch', (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { path: filePath } = req.body;
+    if (!filePath) return res.status(400).json({ error: 'path required' });
+
+    const result = WorkspaceService.writeFile(project.id, filePath, '');
+    res.json(result);
+  } catch (err) {
+    console.error('[FS] Touch error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/mkdir', (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { path: dirPath } = req.body;
+    if (!dirPath) return res.status(400).json({ error: 'path required' });
+
+    const result = WorkspaceService.createDirectory(project.id, dirPath);
+    res.json(result);
+  } catch (err) {
+    console.error('[FS] Mkdir error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/rename', (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { oldPath, newPath } = req.body;
+    if (!oldPath || !newPath) return res.status(400).json({ error: 'oldPath and newPath required' });
+
+    const result = WorkspaceService.renameFile(project.id, oldPath, newPath);
+    res.json(result);
+  } catch (err) {
+    console.error('[FS] Rename error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/file', (req, res) => {
+  try {
+    const project = getUserProject(req, req.query.projectId);
+    const filePath = req.query.path;
+    if (!filePath) return res.status(400).json({ error: 'path required' });
+
+    const normReqPath = filePath.replace(/^[\/\\]+/, '');
+    let isAuthorized = false;
+    const key = `${req.user.id}:${project.id}`;
+    const authRecord = authorizedDeletions.get(key);
+
+    if (authRecord) {
+      if (Date.now() < authRecord.expiry) {
+        if (normReqPath === authRecord.path || normReqPath.startsWith(authRecord.path !== '' ? authRecord.path + '/' : '')) {
+          isAuthorized = true;
+          authorizedDeletions.delete(key);
+        }
+      } else {
+        authorizedDeletions.delete(key);
+      }
+    }
+
+    const result = WorkspaceService.deleteFile(project.id, filePath, isAuthorized);
+    console.log(JSON.stringify({ AUDIT: 'DELETE', timestamp: new Date().toISOString(), userId: req.user.id, projectId: project.id, filePath, result: 'SUCCESS' }));
+    res.json(result);
+  } catch (err) {
+    console.log(JSON.stringify({ AUDIT: 'DELETE', timestamp: new Date().toISOString(), userId: req.user?.id, projectId: req.query.projectId, filePath: req.query.path, result: 'FAILED', reason: err.message }));
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/upload', (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { path: filePath, content, encoding } = req.body;
+    if (!filePath) return res.status(400).json({ error: 'path required' });
+    
+    if (encoding === 'base64') {
+      const fullPath = WorkspaceService.validateFilePath(project.id, filePath);
+      const fs = require('fs');
+      const pathUtils = require('path');
+      const dir = pathUtils.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fullPath, Buffer.from(content, 'base64'));
+      res.json({ path: filePath, created: true });
+    } else {
+      const result = WorkspaceService.writeFile(project.id, filePath, content);
+      res.json(result);
+    }
+  } catch (err) {
+    console.error('[FS] Upload error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/git-clone', async (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { url, targetDir = '' } = req.body;
+    if (!url) return res.status(400).json({ error: 'url required' });
+
+    // Ensure it's inside the workspace
+    const fullPath = WorkspaceService.validateFilePath(project.id, targetDir);
+
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+    
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw new Error('Invalid git URL');
+    }
+    
+    // We clone directly into the fullPath, ensure it exists!
+    const fs = require('fs');
+    if (!fs.existsSync(fullPath)) {
+      fs.mkdirSync(fullPath, { recursive: true });
+    }
+
+    await execPromise(`git clone "${url.replace(/"/g, '')}" .`, { cwd: fullPath });
+    
+    res.json({ success: true, path: targetDir });
+  } catch (err) {
+    console.error('[FS] Git clone error:', err.message);
     res.status(400).json({ error: err.message });
   }
 });

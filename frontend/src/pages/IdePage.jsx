@@ -55,11 +55,12 @@ function ContextMenu({ x, y, node, onClose, onNewFile, onNewFolder, onRename, on
             {node?.isDir && item(<FilePlus size={13} />, 'New File', () => onNewFile(node))}
             {node?.isDir && item(<FolderPlus size={13} />, 'New Folder', () => onNewFolder(node))}
             {node?.isDir && item(<FolderOpen size={13} />, 'Import File', () => { setImportTarget(node.path); document.getElementById('hidden-file-input')?.click(); })}
+            {node?.isDir && item(<Upload size={13} />, 'Import Folder', () => { setImportTarget(node.path); document.getElementById('hidden-folder-input')?.click(); })}
             {node?.isDir && <div style={{ borderTop: '1px solid #30363d', margin: '2px 0' }} />}
             {item(<Pencil size={13} />, 'Rename', () => onRename(node))}
             {item(<Trash2 size={13} />, 'Delete', () => onDelete(node), true)}
-            {(node?.path === '/' || node?.isDir) && <div style={{ borderTop: '1px solid #30363d', margin: '2px 0' }} />}
-            {(node?.path === '/' || node?.isDir) && item(<AlertCircle size={13} />, 'Request Deletion', () => onNewFile({ path: `[REQUEST_DELETE] ${node.path === '/' ? 'root' : node.path}` }), true)}
+            <div style={{ borderTop: '1px solid #30363d', margin: '2px 0' }} />
+            {item(<AlertCircle size={13} />, 'Request Deletion', () => onNewFile({ path: `[REQUEST_DELETE] ${node?.path === '/' ? 'root' : node?.path}` }), true)}
         </div>
     );
 }
@@ -175,6 +176,8 @@ export default function IDE() {
     // Context menu
     const [ctxMenu, setCtxMenu] = useState(null); // { x, y, node }
     const [importTarget, setImportTarget] = useState('/');
+    const [authTargetPath, setAuthTargetPath] = useState(null);
+    const [lastImportedFolder, setLastImportedFolder] = useState('');
 
     // Status bar
     const [statusMsg, setStatusMsg] = useState('');
@@ -183,7 +186,7 @@ export default function IDE() {
     // State from Store
     const { 
         project, currentTask, chatLog, addChatMessage,
-        userId
+        userId, token
     } = useStore();
 
     const [chatInput, setChatInput] = useState('');
@@ -201,6 +204,14 @@ export default function IDE() {
     const fitAddonRef = useRef(null);
     const autoSaveTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
+    const chatEndRef = useRef(null);
+
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chatLog, isAsking, showChat]);
+
+    // Terminal Active Path Indicator
+    const [activeTerminalDir, setActiveTerminalDir] = useState('/');
 
     // ── FS helpers ──────────────────────────────────────────────────────────
     const status = (msg, err = false) => {
@@ -220,7 +231,15 @@ export default function IDE() {
     const toggleDir = (path) => {
         setExpandedDirs(prev => {
             const next = new Set(prev);
-            next.has(path) ? next.delete(path) : next.add(path);
+            if (next.has(path)) {
+                next.delete(path);
+            } else {
+                next.add(path);
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'cd', path }));
+                    setActiveTerminalDir(path);
+                }
+            }
             return next;
         });
     };
@@ -314,6 +333,7 @@ export default function IDE() {
         try {
             if (type === 'newFile' && node?.path.startsWith('[REQUEST_DELETE]')) {
                 const target = node.path.replace('[REQUEST_DELETE] ', '');
+                setAuthTargetPath(target || '/');
                 setChatInput(`I would like to delete the folder: "${target || 'root'}". Is this safe? Please authorize.`);
                 setTimeout(() => {
                    const sendBtn = document.querySelector('button[title="Send Message"]');
@@ -342,7 +362,7 @@ export default function IDE() {
                 status('Renamed to ' + val);
             } else if (type === 'gitClone') {
                 status('Cloning… this may take a moment');
-                await api.gitClone(val, node?.path || null);
+                await api.gitClone(val, node?.path || '');
                 status('Cloned successfully');
             }
             await loadFsTree();
@@ -386,9 +406,11 @@ export default function IDE() {
         fitAddonRef.current = fitAddon;
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Always point to backend port 3001 for terminal, regardless of where frontend is
-        const host = window.location.host.split(':')[0]; // get hostname part
-        const ws = new WebSocket(`${protocol}//${host}:3001/api/v1/terminal`);
+        const host = window.location.host.split(':')[0]; 
+        
+        if (!project || !token) return; // Wait until authenticated
+        
+        const ws = new WebSocket(`${protocol}//${host}:3001/api/v1/terminal?projectId=${project.id}&token=${token}`);
         wsRef.current = ws;
         ws.onopen = () => {
             console.log('[IDE] Terminal WebSocket connected');
@@ -406,8 +428,8 @@ export default function IDE() {
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         };
         window.addEventListener('resize', resize);
-        return () => { window.removeEventListener('resize', resize); ws.close(); term.dispose(); };
-    }, []);
+        return () => { window.removeEventListener('resize', resize); if(ws.readyState === WebSocket.OPEN) ws.close(); term.dispose(); };
+    }, [project?.id, token]);
 
     useEffect(() => {
         if (fitAddonRef.current) setTimeout(() => fitAddonRef.current.fit(), 100);
@@ -433,8 +455,10 @@ export default function IDE() {
                 res = await api.askProjectQuestion(project.id, userMsg, activeFileContent, activeFile?.path);
             }
             if (res.message.includes('AUTHORIZE_DELETE')) {
-                await api.authorizeDeletion();
-                addChatMessage({ role: 'system', content: '✓ Dangerous operations authorized for 2 minutes.' });
+                const target = authTargetPath || '/';
+                await api.authorizeDeletion(project?.id, target);
+                addChatMessage({ role: 'system', content: `✓ Deletion of '${target}' authorized for 2 minutes.` });
+                setAuthTargetPath(null);
             }
             addChatMessage({ role: 'mentor', content: res.message });
         } catch (e) {
@@ -444,28 +468,77 @@ export default function IDE() {
     };
 
     const handleFileUpload = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-            try {
-                const result = ev.target.result;
-                if (!result.includes(',')) throw new Error('Invalid file format');
-                const content = result.split(',')[1];
-                const targetPath = joinPath(importTarget, file.name);
-                console.log('[IDE] Uploading', targetPath, 'target:', importTarget);
-                await api.uploadFile(targetPath, content, 'base64');
-                status('Imported ' + file.name);
-                await loadFsTree();
-                // Ensure we open with the exact path returned by backend/joinPath
-                handleOpenFile({ name: file.name, path: targetPath, isDir: false });
-            } catch (err) { 
-                console.error('[IDE] Import failed', err);
-                status('Import failed: ' + err.message, true); 
+        // Filter out massive hidden directories users usually don't mean to drag into the browser IDE
+        const allFiles = Array.from(e.target.files || []);
+        const files = allFiles.filter(f => {
+            const p = f.webkitRelativePath || f.name;
+            return !p.includes('/node_modules/') && !p.includes('/.git/') && !p.startsWith('.git/') && !p.startsWith('node_modules/');
+        });
+
+        if (!files.length) {
+            status('No valid files found or all were filtered (.git/node_modules)');
+            return;
+        }
+
+        status(`Preparing ${files.length} file(s)...`);
+        let count = 0;
+        let lastTreeUpdate = Date.now();
+        let topLevelFolder = null;
+
+        // Process files sequentially but without heavy blocking, updating UI every 20 files
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const relPath = file.webkitRelativePath || file.name;
+            
+            if (!topLevelFolder && file.webkitRelativePath) {
+                topLevelFolder = file.webkitRelativePath.split('/')[0];
             }
-        };
-        reader.onerror = () => status('Read failed', true);
-        reader.readAsDataURL(file);
+            
+            await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = async (ev) => {
+                    try {
+                        const result = ev.target.result;
+                        if (!result.includes(',')) throw new Error('Invalid format');
+                        const content = result.split(',')[1];
+                        const targetPath = joinPath(importTarget, relPath);
+                        await api.uploadFile(targetPath, content, 'base64');
+                        count++;
+                        
+                        if (files.length === 1) {
+                            handleOpenFile({ name: file.name, path: targetPath, isDir: false });
+                        }
+                    } catch (err) {
+                        console.error('Import failed for', relPath, err);
+                    }
+                    resolve();
+                };
+                reader.onerror = () => resolve();
+                reader.readAsDataURL(file);
+            });
+
+            // Update status every 10 files to show live progress
+            if (i % 10 === 0 || i === files.length - 1) {
+                status(`Importing [${i + 1}/${files.length}]...`);
+            }
+            // Update the sidebar tree every 2 seconds during deep imports
+            if (Date.now() - lastTreeUpdate > 2000) {
+                await loadFsTree();
+                lastTreeUpdate = Date.now();
+            }
+        }
+        
+        status(`Imported ${count} file(s) successfully`);
+        await loadFsTree();
+        
+        if (topLevelFolder && wsRef.current?.readyState === WebSocket.OPEN) {
+            const newPath = joinPath(importTarget, topLevelFolder);
+            wsRef.current.send(JSON.stringify({ type: 'cd', path: newPath }));
+            setExpandedDirs(prev => new Set(prev).add(newPath));
+            setActiveTerminalDir(newPath);
+            setLastImportedFolder(topLevelFolder);
+        }
+
         e.target.value = '';
     };
 
@@ -489,6 +562,27 @@ export default function IDE() {
         }
     };
 
+    const handleDownloadWorkspace = async () => {
+        status('Packing workspace into ZIP...', false);
+        try {
+            const headers = { 'Authorization': `Bearer ${token}` };
+            const res = await fetch(`/api/v1/fs/download/${project.id}`, { headers });
+            if (!res.ok) throw new Error('ZIP generation failed');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${project.title.replace(/[^a-z0-9]/gi, '_')}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            status('Workspace downloaded!');
+        } catch (err) {
+            status('Failed to download: ' + err.message, true);
+        }
+    };
+
     const getLanguage = (name = '') => {
         if (name.endsWith('.jsx') || name.endsWith('.js')) return 'javascript';
         if (name.endsWith('.ts') || name.endsWith('.tsx')) return 'typescript';
@@ -508,7 +602,9 @@ export default function IDE() {
                 <span style={{ fontWeight: 800, fontSize: 12, color: '#58a6ff', marginRight: 8 }}>AMIT-BODHIT IDE</span>
                 <button title="New File (right-click explorer)" onClick={() => openModal('newFile', { path: '', isDir: true }, 'filename.js')} style={iconBtn}><FilePlus size={14} /></button>
                 <button title="New Folder" onClick={() => openModal('newFolder', { path: '', isDir: true }, 'folder-name')} style={iconBtn}><FolderPlus size={14} /></button>
-                <button title="Import File (Top)" onClick={() => { setImportTarget('/'); fileInputRef.current?.click(); }} style={iconBtn}><FolderOpen size={14} /></button>
+                <button title="Import File (Top)" onClick={() => { setImportTarget('/'); document.getElementById('hidden-file-input')?.click(); }} style={iconBtn}><FolderOpen size={14} /></button>
+                <button title="Import Folder" onClick={() => { setImportTarget('/'); document.getElementById('hidden-folder-input')?.click(); }} style={iconBtn}><Upload size={14} /></button>
+                <button title="Export Workspace (ZIP)" onClick={handleDownloadWorkspace} style={iconBtn}><Download size={14} /></button>
                 <button title="Git Clone" onClick={() => openModal('gitClone', null, 'https://github.com/user/repo.git')} style={iconBtn}><GitBranchPlus size={14} /></button>
                 <button title="Refresh Explorer" onClick={loadFsTree} style={iconBtn}><RefreshCw size={14} /></button>
                 <div style={{ flex: 1 }} />
@@ -529,7 +625,9 @@ export default function IDE() {
                 {showSidebar && (
                     <div style={{ width: 240, borderRight: '1px solid #21262d', display: 'flex', flexDirection: 'column', background: '#0d0d0d', flexShrink: 0 }}>
                         <div style={{ padding: '8px 12px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#8b949e', flex: 1 }}>PROJECT WORKSPACE</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#8b949e', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {lastImportedFolder ? lastImportedFolder.toUpperCase() : 'PROJECT WORKSPACE'}
+                            </span>
                             <button title="New File" onClick={() => openModal('newFile', { path: '', isDir: true }, 'newfile.js')} style={smallIconBtn}><FilePlus size={12} /></button>
                             <button title="New Folder" onClick={() => openModal('newFolder', { path: '', isDir: true }, 'new-folder')} style={smallIconBtn}><FolderPlus size={12} /></button>
                             <button title="Refresh" onClick={loadFsTree} style={smallIconBtn}><RefreshCw size={12} /></button>
@@ -603,7 +701,9 @@ export default function IDE() {
                         <div style={{ height: 240, borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', padding: '3px 12px', background: '#010409', borderBottom: '1px solid #21262d' }}>
                                 <TerminalSquare size={12} style={{ marginRight: 6, color: '#8b949e' }} />
-                                <span style={{ fontSize: 10, color: '#8b949e', flex: 1, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Terminal</span>
+                                <span style={{ fontSize: 10, color: '#8b949e', flex: 1, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                                    Terminal › {activeTerminalDir || '/'}
+                                </span>
                                 <button onClick={() => setShowTerm(false)} style={{ ...smallIconBtn, color: '#8b949e' }}>×</button>
                             </div>
                             <div style={{ flex: 1, padding: 6, background: '#0a0a0a', minHeight: 0 }} ref={termRef} />
@@ -689,6 +789,7 @@ export default function IDE() {
                                     <Loader2 size={14} className="spin" /> Mentor is typing…
                                 </div>
                             )}
+                            <div ref={chatEndRef} />
                         </div>
                         <div style={{ padding: 10, borderTop: '1px solid #21262d' }}>
                             <div style={{ display: 'flex', gap: 6 }}>
@@ -761,7 +862,8 @@ export default function IDE() {
                 </div>
             )}
             {/* HIDDEN INPUTS */}
-            <input type="file" id="hidden-file-input" ref={fileInputRef} onChange={handleFileUpload} style={{ display: 'none' }} />
+            <input type="file" id="hidden-file-input" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
+            <input type="file" id="hidden-folder-input" webkitdirectory="" directory="" onChange={handleFileUpload} style={{ display: 'none' }} />
         </div>
     );
 }
