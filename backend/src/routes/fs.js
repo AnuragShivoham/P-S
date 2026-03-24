@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const WorkspaceService = require('../services/workspaceService');
 const db = require('../db/database');
+const fs = require('fs');
 
 const authorizedDeletions = new Map();
 
@@ -45,6 +46,40 @@ function getUserProject(req, projectId) {
  * File System Routes
  * All operations are sandboxed to project workspace
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /download/:projectId - Download entire workspace as ZIP
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/download/:projectId', (req, res) => {
+  try {
+    const project = getUserProject(req, req.params.projectId);
+    const workspacePath = WorkspaceService.getProjectPath(project.id);
+
+    if (!fs.existsSync(workspacePath)) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="workspace.zip"`);
+
+    archive.on('error', (err) => {
+      console.error('[FS] ZIP error:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'ZIP generation failed' });
+    });
+
+    archive.pipe(res);
+    archive.directory(workspacePath, false);
+    archive.finalize();
+  } catch (err) {
+    console.error('[FS] Download error:', err);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /files/:projectId - List files in directory
@@ -359,6 +394,59 @@ router.post('/git-clone', async (req, res) => {
     res.json({ success: true, path: targetDir });
   } catch (err) {
     console.error('[FS] Git clone error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /git-push - Commit and push all workspace changes
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/git-push', async (req, res) => {
+  try {
+    const project = getUserProject(req, req.body.projectId);
+    const { message = 'AMIT-BODHIT: auto-save checkpoint' } = req.body;
+    
+    const workspacePath = WorkspaceService.getProjectPath(project.id);
+    
+    if (!fs.existsSync(workspacePath)) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+
+    // Check if git is initialized
+    if (!fs.existsSync(require('path').join(workspacePath, '.git'))) {
+      return res.status(400).json({ error: 'No git repository found. Use Git Clone first or run `git init` in the terminal.' });
+    }
+
+    // Stage all, commit, push
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const commitMsg = `${message} [${timestamp}]`;
+    
+    await execPromise('git add -A', { cwd: workspacePath });
+    
+    try {
+      await execPromise(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: workspacePath });
+    } catch (commitErr) {
+      // No changes to commit is not an error — check stdout, stderr AND message (Windows puts it in stdout)
+      const errText = (commitErr.stdout || '') + (commitErr.stderr || '') + (commitErr.message || '');
+      if (errText.includes('nothing to commit')) {
+        return res.json({ success: true, message: 'Nothing to commit — workspace is clean ✓' });
+      }
+      throw commitErr;
+    }
+    
+    try {
+      const { stdout } = await execPromise('git push', { cwd: workspacePath, timeout: 30000 });
+      res.json({ success: true, message: `Pushed successfully`, output: stdout });
+    } catch (pushErr) {
+      // Push failed — still committed locally
+      res.json({ success: true, committed: true, pushFailed: true, message: 'Committed locally but push failed. Check remote config.', error: pushErr.stderr || pushErr.message });
+    }
+  } catch (err) {
+    console.error('[FS] Git push error:', err.message);
     res.status(400).json({ error: err.message });
   }
 });

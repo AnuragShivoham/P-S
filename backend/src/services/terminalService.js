@@ -3,9 +3,8 @@ const path = require('path');
 const pty = require('node-pty');
 const { v4: uuid } = require('uuid');
 const db = require('../db/database');
-
-
-/**
+const jwt = require('jsonwebtoken');
+const config = require('../config');/**
  * Setup WebSocket terminal connections
  */
 function setupTerminalWS(wss, authenticate) {
@@ -20,6 +19,19 @@ function setupTerminalWS(wss, authenticate) {
       return;
     }
 
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.JWT_SECRET);
+    } catch (err) {
+      ws.close(1008, 'Invalid token');
+      return;
+    }
+
+    const project = db.prepare('SELECT user_id FROM projects WHERE id = ?').get(projectId);
+    if (!project || project.user_id !== decoded.id) {
+      ws.close(1008, 'Access denied or project not found');
+      return;
+    }
 
     console.log(`[Terminal] New connection for project: ${projectId}`);
 
