@@ -1,23 +1,47 @@
 const config = require('../config');
 
-async function callClaude(system, userMsg, history = [], maxTokens = 2000, temp = 0.2, isJson = false) {
+async function callClaude(system, userMsg, history = [], maxTokens = 2000, temp = 0.2, isJson = false, image = null) {
+  // aggressive token truncation to survive 12000 TPM limit on Groq Free Tier
+  const safeSystem = String(system).length > 8000 ? String(system).substring(0, 8000) + '\n...[TRUNCATED]' : system;
+  const safeUserMsg = String(userMsg).length > 12000 ? String(userMsg).substring(0, 12000) + '\n...[TRUNCATED_DUE_TO_API_LIMITS]' : String(userMsg);
+  
+  // Phase 8: Dynamic Vision Model Switching
+  const hasImage = image && typeof image === 'string' && image.startsWith('data:image');
+  const model = hasImage ? 'llama-3.2-11b-vision-preview' : config.GROQ_MODEL;
+  
+  // Build user message content (multi-modal if image present)
+  let userContent;
+  if (hasImage) {
+    userContent = [
+      { type: 'text', text: safeUserMsg },
+      { type: 'image_url', image_url: { url: image } }
+    ];
+  } else {
+    userContent = safeUserMsg;
+  }
+  
   const messages = [
-    { role: 'system', content: system },
-    ...history.filter(m => m && m.content).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) })),
-    { role: 'user', content: userMsg },
+    { role: 'system', content: safeSystem },
+    ...history.filter(m => m && m.content).slice(-4).map(m => ({ 
+        role: m.role === 'assistant' ? 'assistant' : 'user', 
+        content: String(m.content).substring(0, 1500) 
+    })),
+    { role: 'user', content: userContent },
   ];
   
   const body = { 
-    model: config.GROQ_MODEL, 
+    model, 
     messages, 
     max_tokens: maxTokens, 
     temperature: temp
   };
 
-  // Enable JSON mode if requested (Llama 3 supports this on Groq)
-  if (isJson) {
+  // Enable JSON mode if requested (not supported on vision models)
+  if (isJson && !hasImage) {
     body.response_format = { type: 'json_object' };
   }
+
+  if (hasImage) console.log(`[Vision] Switching to ${model} for image analysis`);
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',

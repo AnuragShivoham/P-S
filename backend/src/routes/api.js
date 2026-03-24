@@ -5,10 +5,12 @@ const tracker = require('../services/progressTracker');
 const goalClarifier     = require('../engines/goalClarifier');
 const milestoneGenerator = require('../engines/milestoneGenerator');
 const taskPlanner       = require('../engines/taskPlanner');
+const courseService     = require('../services/courseService');
 const guidedExecution   = require('../engines/guidedExecution');
 const qaCritic          = require('../engines/qaCritic');
 const automationAdvisor = require('../engines/automationAdvisor');
 const WorkspaceService  = require('../services/workspaceService');
+const auth = require('../middleware/auth');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Route Error]', e.message);
@@ -139,30 +141,157 @@ router.post('/goals/clarify', wrap(async (req, res) => {
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
+// COURSE ENGINE ROUTES (V2)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/courses', wrap(async (req, res) => {
+  const courses = courseService.getActiveCourses();
+  res.json(courses);
+}));
+
+router.get('/courses/:id', wrap(async (req, res) => {
+  const structure = courseService.getCourseFullStructure(req.params.id);
+  if (!structure || !structure.course.active) {
+    return res.status(404).json({ error: 'Course inactive or not found' });
+  }
+  res.json(structure);
+}));
+
+router.post('/courses/:id/start', wrap(async (req, res) => {
+  const courseId = req.params.id;
+  const courseInfo = courseService.getCourse(courseId);
+  
+  if (!courseInfo || !courseInfo.active) {
+    return res.status(404).json({ error: 'Course unavailable' });
+  }
+
+  // Create Reference Project Shell
+  const { v4: uuidv4 } = require('uuid');
+  const db = require('../db/database');
+  const projId = uuidv4();
+  
+  db.prepare(`
+    INSERT INTO projects (id, user_id, raw_goal, title, tech_stack, status, is_course, course_id, course_version, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `).run(
+    projId, 
+    req.user.id, 
+    `Learning Course: ${courseInfo.title}`, 
+    courseInfo.title, 
+    courseInfo.tech_stack, 
+    'active', 
+    1, 
+    courseInfo.id, 
+    courseInfo.version
+  );
+
+  const workspaceService = require('../services/workspaceService');
+  await workspaceService.initWorkspace(projId, 'nodejs');
+  
+  tracker.setActiveProject(req.user.id, projId);
+  res.json({ success: true, project_id: projId });
+}));
+
+router.post('/courses/tasks/:id/submit', wrap(async (req, res) => {
+  const courseTaskId = req.params.id;
+  const { projectId } = req.body; // Need to know which session to check
+
+  const project = tracker.getProject(projectId);
+  if (!project || project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  if (!project.is_course) return res.status(400).json({ error: 'Not a course project' });
+
+  // Get source-of-truth task rule
+  const db = require('../db/database');
+  const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(courseTaskId);
+  if (!courseTask) return res.status(404).json({ error: 'Task missing' });
+
+  const WorkspaceService = require('../services/workspaceService');
+  const workspacePath = WorkspaceService.getWorkspacePath(projectId);
+
+  // BYPASS QA CRITIC -> Static Sandbox Eval
+  const result = courseService.validateStaticTask(courseTask, workspacePath);
+
+  // User table = progress only (Upsert into course_progress)
+  // Ensure attempt counts increment safely
+  db.prepare(`
+    INSERT INTO course_progress (id, project_id, course_task_id, status, attempts, completed_at)
+    VALUES (?, ?, ?, ?, 1, ?)
+    ON CONFLICT(id) DO UPDATE SET 
+      attempts = attempts + 1,
+      status = excluded.status,
+      completed_at = excluded.completed_at
+  `).run(
+    require('uuid').v4(), 
+    projectId, 
+    courseTaskId, 
+    result.passed ? 'passed' : 'failed', 
+    result.passed ? new Date().toISOString() : null
+  );
+
+  res.json({
+    verdict: result.passed ? 'pass' : 'fail',
+    feedback: result.passed ? 'Excellent work! Everything looks correct.' : result.hint,
+    corrections: [] // No AI suggestions mapped
+  });
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BEHAVIOR & SCAFFOLDING (V2 ENGINE)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/courses/behavior/log', auth, wrap(async (req, res) => {
+  const learningController = require('../engines/learningController');
+  const { taskId, pasteSize, typingSpeed, attempts, timeSpent } = req.body;
+  if (!taskId) return res.status(400).json({ error: 'Missing course task context' });
+  
+  const result = learningController.analyzeBehavior(req.user.id, { taskId, pasteSize, typingSpeed, attempts, timeSpent });
+  res.json(result); 
+}));
+
+router.get('/courses/tasks/:id/scaffold', auth, wrap(async (req, res) => {
+  const learningController = require('../engines/learningController');
+  const courseTaskId = req.params.id;
+  const db = require('../db/database');
+  
+  // 1. (BEST) Derive Active Project explicitly from immutable User session state (No timestamp guesswork)
+  const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+  
+  if (!userRow || !userRow.active_project_id) {
+     return res.status(403).json({ error: 'Access denied: No active course project found for user' });
+  }
+  const projectId = userRow.active_project_id;
+  
+  let progressData = { attempts: 0, last_scaffold_level: 1 };
+  const pRow = db.prepare('SELECT attempts, last_scaffold_level FROM course_progress WHERE course_task_id = ? AND project_id = ?').get(courseTaskId, projectId);
+  if (pRow) progressData = pRow;
+  
+  const behaviorData = db.prepare('SELECT cheat_score FROM behavior_logs WHERE user_id = ? AND task_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, courseTaskId) || { cheat_score: 0 };
+  
+  const payload = learningController.controlScaffold(req.user.id, courseTaskId, true, projectId, progressData, behaviorData);
+  res.json(payload);
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROJECTS
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/projects/latest', wrap(async (req, res) => {
   const userId = req.user.id;
-  console.log(`[REHYDRATE] UID: ${userId} (${req.user.email})`);
+  const user = tracker.getUser(userId);
+  let latestId = user.active_project_id;
   
-  const projects = tracker.getUserProjects(userId);
-  console.log(`[REHYDRATE] Found ${projects.length} project(s)`);
-  
-  if (!projects || projects.length === 0) {
-    return res.json({ project: null });
+  if (!latestId) {
+    const projects = tracker.getUserProjects(userId);
+    if (!projects || projects.length === 0) return res.json({ project: null });
+    latestId = projects[0].id;
   }
+  
+  const state = tracker.getResumeState(latestId);
+  if (!state || !state.project || state.project.user_id !== userId) return res.json({ project: null });
 
-  const latest = projects[projects.length - 1];
-  console.log(`[REHYDRATE] Returning latest: ${latest.id} ("${latest.title}")`);
-  
-  const state = tracker.getResumeState(latest.id);
-  
   res.json({
     action: 'task_guidance',
     project: state.project,
     task: state.task,
-    milestones: tracker.getProjectMilestones(latest.id),
-    conversation: tracker.getConversation(latest.id, 100),
+    milestones: tracker.getProjectMilestones(latestId),
+    conversation: tracker.getConversation(latestId, userId, 100),
   });
 }));
 
@@ -189,13 +318,15 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
+  tracker.setActiveProject(req.user.id, project.id);
+
   res.json({
     action: 'task_guidance',
     message: `Resuming '${project.title}' — ${project.progress_pct}% (${project.completed_tasks}/${project.total_tasks} tasks)\nCurrent: ${milestone?.title || 'N/A'} › ${task?.title || 'All done'}`,
     project,
     task,
     milestones: tracker.getProjectMilestones(project.id),
-    conversation: tracker.getConversation(project.id, 100),
+    conversation: tracker.getConversation(project.id, req.user.id, 100),
   });
 }));
 
@@ -224,7 +355,7 @@ router.get('/projects/:id/conversation', wrap(async (req, res) => {
   const p = tracker.getProject(req.params.id);
   if (!p) return res.status(404).json({ error: 'Project not found' });
   if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
-  res.json(tracker.getConversation(req.params.id, 100));
+  res.json(tracker.getConversation(req.params.id, req.user.id, 100));
 }));
 
 router.get('/projects/:id/automations', wrap(async (req, res) => {
@@ -248,9 +379,61 @@ router.get('/tasks/:id', wrap(async (req, res) => {
 }));
 
 router.post('/tasks/:id/start', wrap(async (req, res) => {
+  // V2 Course Tasks Hook (SQLite Integers)
+  if (!isNaN(req.params.id)) {
+      const db = require('../db/database');
+      const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(req.params.id);
+      
+      if (courseTask) {
+          const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+          const projectId = userRow?.active_project_id;
+          
+          if (!projectId) return res.status(403).json({ error: 'No active course project found for user' });
+
+          const prog = db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND course_task_id = ?').get(projectId, courseTask.id);
+          
+          if (prog && !['pending', 'failed'].includes(prog.status)) {
+              return res.status(400).json({ error: `Cannot start task with status: ${prog.status}` });
+          }
+
+          if (prog) {
+              db.prepare('UPDATE course_progress SET status = ?, started_at = datetime("now"), updated_at = datetime("now") WHERE id = ?').run('in_progress', prog.id);
+          } else {
+              db.prepare(`
+                  INSERT INTO course_progress (id, project_id, course_task_id, status, attempts, started_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, datetime("now"), datetime("now"))
+              `).run(require('crypto').randomUUID(), projectId, courseTask.id, 'in_progress', 1);
+          }
+
+          let parsedCommands = [];
+          try { parsedCommands = JSON.parse(courseTask.commands || "[]"); } catch(e) {}
+          let parsedConcepts = [];
+          try { parsedConcepts = JSON.parse(courseTask.concepts_taught || "[]"); } catch(e) {}
+          let parsedFolder = {};
+          try { parsedFolder = JSON.parse(courseTask.folder_structure || "{}"); } catch(e) {}
+
+          const updatedTask = {
+              ...courseTask,
+              commands: parsedCommands,
+              concepts_taught: parsedConcepts,
+              folder_structure: parsedFolder,
+              status: 'in_progress',
+              attempts: prog ? prog.attempts : 1
+          };
+          
+          const cmds = parsedCommands.map(c => `  $ ${c}`).join('\n');
+          return res.json({ 
+              action: 'task_guidance', 
+              message: `Task started: ${updatedTask.title}\nEst: ${updatedTask.estimated_hours}h\n\nRun:\n${cmds}`, 
+              task: updatedTask 
+          });
+      }
+  }
+
+  // V1 Legacy Fallback
   const task = tracker.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (!['pending','failed'].includes(task.status)) return res.status(400).json({ error: `Cannot start task with status: ${task.status}` });
+  if (!['pending','failed','submitted'].includes(task.status)) return res.status(400).json({ error: `Cannot start task with status: ${task.status}` });
   const updated = tracker.startTask(task.id);
   const cmds = (updated.commands || []).map(c => `  $ ${c}`).join('\n');
   res.json({ action: 'task_guidance', message: `Task started: ${updated.title}\nEst: ${updated.estimated_hours}h\n\nRun:\n${cmds}`, task: updated });
@@ -266,8 +449,8 @@ router.post('/tasks/:id/hint', wrap(async (req, res) => {
 }));
 
 router.post('/tasks/:id/ask', wrap(async (req, res) => {
-  const { question, activeFileContent, activeFilePath } = req.body;
-  if (!question) return res.status(400).json({ error: 'question required' });
+  const { question, activeFileContent, activeFilePath, image } = req.body;
+  if (!question && !image) return res.status(400).json({ error: 'question or image required' });
   const task = tracker.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   
@@ -278,7 +461,7 @@ router.post('/tasks/:id/ask', wrap(async (req, res) => {
   let treeNodes = [];
   try { if (project) treeNodes = WorkspaceService.listFiles(project.id); } catch(e) {}
   
-  const guidance = await guidedExecution.getGuidance(task, question, history, activeFileContent, activeFilePath, project, milestones, treeNodes);
+  const guidance = await guidedExecution.getGuidance(task, question || 'Analyze this screenshot and help me fix the error.', history, activeFileContent, activeFilePath, project, milestones, treeNodes, image);
   
   if (project) {
     tracker.logTurn(project.id, 'user',   question, 'task_guidance', task.id);
@@ -288,18 +471,18 @@ router.post('/tasks/:id/ask', wrap(async (req, res) => {
 }));
 
 router.post('/projects/:id/ask', wrap(async (req, res) => {
-  const { question, activeFileContent, activeFilePath } = req.body;
-  if (!question) return res.status(400).json({ error: 'question required' });
+  const { question, activeFileContent, activeFilePath, image } = req.body;
+  if (!question && !image) return res.status(400).json({ error: 'question or image required' });
   const project = tracker.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   const milestones = tracker.getProjectMilestones(project.id);
-  const history = tracker.getConversation(project.id, 10).map(t => ({ role: t.role, content: t.content })).reverse();
+  const history = tracker.getConversation(project.id, req.user.id, 10).map(t => ({ role: t.role, content: t.content })).reverse();
   
   let treeNodes = [];
   try { treeNodes = WorkspaceService.listFiles(project.id); } catch(e) {}
 
-  const guidance = await guidedExecution.getGuidance(null, question, history, activeFileContent, activeFilePath, project, milestones, treeNodes);
+  const guidance = await guidedExecution.getGuidance(null, question || 'Analyze this screenshot and help me fix the error.', history, activeFileContent, activeFilePath, project, milestones, treeNodes, image);
   
   tracker.logTurn(project.id, 'user',   question, 'general_guidance');
   tracker.logTurn(project.id, 'mentor', guidance, 'general_guidance');
@@ -316,7 +499,7 @@ router.post('/tasks/submit', wrap(async (req, res) => {
 
   let task = tracker.getTask(task_id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
-  if (!['in_progress','failed'].includes(task.status)) {
+  if (!['in_progress','failed','submitted'].includes(task.status)) {
     return res.status(400).json({ error: `Cannot submit task with status: ${task.status}` });
   }
 

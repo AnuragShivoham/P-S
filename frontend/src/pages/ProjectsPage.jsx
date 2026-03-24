@@ -14,6 +14,7 @@ export default function ProjectsPage() {
   const [resumingId, setResumingId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [filter, setFilter] = useState('ai');
 
   const fetchProjects = async () => {
     try {
@@ -58,17 +59,31 @@ export default function ProjectsPage() {
     }
   };
 
+  const aiProjects = projects.filter(p => !p.is_course);
+  const courseProjects = projects.filter(p => p.is_course);
+  const displayProjects = filter === 'ai' ? aiProjects : courseProjects;
+
   return (
     <div className="goal-pg" style={{ alignItems: 'flex-start', paddingTop: 80 }}>
       <div style={{ width: '100%', maxWidth: 1000, margin: '0 auto' }}>
         
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 30 }}>
-          <div>
-            <div className="g-eye" style={{ marginBottom: 8 }}>// Workspace</div>
-            <h1 className="g-h1" style={{ fontSize: 32, marginBottom: 0 }}>My Projects</h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, borderBottom: '1px solid var(--border)', paddingBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 20 }}>
+            <button 
+              onClick={() => setFilter('ai')} 
+              style={{ background: 'transparent', border: 'none', color: filter === 'ai' ? 'var(--blue)' : 'var(--tx-d)', fontSize: 20, fontWeight: 800, cursor: 'pointer', paddingBottom: 4, borderBottom: filter === 'ai' ? '2px solid var(--blue)' : '2px solid transparent' }}
+            >
+              AI Projects
+            </button>
+            <button 
+              onClick={() => setFilter('course')} 
+              style={{ background: 'transparent', border: 'none', color: filter === 'course' ? 'var(--blue)' : 'var(--tx-d)', fontSize: 20, fontWeight: 800, cursor: 'pointer', paddingBottom: 4, borderBottom: filter === 'course' ? '2px solid var(--blue)' : '2px solid transparent' }}
+            >
+              Courses
+            </button>
           </div>
-          <button className="btn btn-p" onClick={() => navigate('/goal')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Plus size={16} /> New Project
+          <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/courses')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={16} /> {filter === 'ai' ? 'New Project' : 'Browse Courses'}
           </button>
         </div>
 
@@ -76,17 +91,19 @@ export default function ProjectsPage() {
 
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><Spinner /></div>
-        ) : projects.length === 0 ? (
-          <div className="card" style={{ textAlign: 'center', padding: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+        ) : displayProjects.length === 0 ? (
+          <div className="card fade-in" style={{ textAlign: 'center', padding: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
             <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--bg-o)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <FolderGit2 size={24} color="var(--tx-d)" />
             </div>
-            <div style={{ color: 'var(--tx-2)', fontSize: 13 }}>You don't have any projects yet.</div>
-            <button className="btn btn-p" onClick={() => navigate('/goal')}>Create Your First Project</button>
+            <div style={{ color: 'var(--tx-2)', fontSize: 13 }}>You don't have any {filter === 'ai' ? 'AI projects' : 'courses'} yet.</div>
+            <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/courses')}>
+              {filter === 'ai' ? 'Create Your First Project' : 'Enroll in a Course'}
+            </button>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
-            {projects.map(p => (
+            {(Array.isArray(displayProjects) ? displayProjects : []).map(p => (
               <div 
                 key={p.id} 
                 className="card" 

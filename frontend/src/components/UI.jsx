@@ -22,7 +22,7 @@ export function TermBlock({ lines = [], label }) {
         {label && <span style={{fontSize:10,color:'var(--tx-d)',marginLeft:6,letterSpacing:'0.1em'}}>{label}</span>}
       </div>
       <div className="term-body">
-        {lines.map((line, i) => (
+        {(Array.isArray(lines) ? lines : []).map((line, i) => (
           <div key={i} className="tl">
             {line.startsWith('$')
               ? <><span className="tp">$</span><span className="tc">{line.slice(1).trim()}</span></>
@@ -42,7 +42,7 @@ export function FolderTree({ tree, depth = 0 }) {
   if (!tree || typeof tree !== 'object') return null;
   return (
     <div className="ftree" style={{ paddingLeft: depth * 14 }}>
-      {Object.entries(tree).map(([key, val]) => (
+      {Object.entries(tree || {}).map(([key, val]) => (
         <div key={key}>
           <span className={val === null ? 'ftfile' : 'ftdir'}>
             {val === null ? '  📄 ' : '  📁 '}{key}
@@ -56,7 +56,7 @@ export function FolderTree({ tree, depth = 0 }) {
 
 // ─── CODE BLOCK ───────────────────────────────────────────────────────────────
 export function CodeBlock({ code }) {
-  if (!code) return null;
+  if (typeof code !== 'string') return null;
   return (
     <pre className="code">
       {code.split('\n').map((line, i) => (
@@ -90,13 +90,13 @@ export function QAPanel({ review, onDismiss }) {
         "{review.feedback_text}"
       </p>
       <div style={{marginBottom:10}}>
-        {(review.passed_checks||[]).map((c,i) => <div key={i} className="qc-pass">✓ {c}</div>)}
-        {(review.failed_checks||[]).map((c,i) => <div key={i} className="qc-fail">✗ {c}</div>)}
+        {(Array.isArray(review.passed_checks) ? review.passed_checks : []).map((c,i) => <div key={i} className="qc-pass">✓ {c}</div>)}
+        {(Array.isArray(review.failed_checks) ? review.failed_checks : []).map((c,i) => <div key={i} className="qc-fail">✗ {c}</div>)}
       </div>
       {review.corrections?.length > 0 && (
         <>
           <div className="lbl" style={{marginTop:12}}>Corrections</div>
-          {review.corrections.map((c,i) => (
+          {(Array.isArray(review.corrections) ? review.corrections : []).map((c,i) => (
             <div key={i} className={`corr corr-${c.severity}`}>
               <div className="corr-lbl" style={{color: sev_color(c.severity)}}>[{c.severity}] {c.issue}</div>
               <div className="corr-hint">→ {c.hint}</div>

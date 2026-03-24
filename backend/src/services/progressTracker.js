@@ -26,6 +26,7 @@ function createUser(email, name, skillLevel) {
 }
 function getUser(id)          { return db.prepare('SELECT * FROM users WHERE id=?').get(id); }
 function getUserByEmail(email) { return db.prepare('SELECT * FROM users WHERE email=?').get(email); }
+function setActiveProject(userId, projectId) { db.prepare('UPDATE users SET active_project_id=? WHERE id=?').run(projectId, userId); }
 
 // PROJECTS
 function createProject(userId, rawGoal) {
@@ -139,8 +140,13 @@ function logTurn(projectId, role, content, contextType, taskId) {
   db.prepare('INSERT INTO conversation_turns (id,project_id,task_id,role,content,context_type) VALUES (?,?,?,?,?,?)')
     .run(id, projectId, taskId || null, role, content, contextType || null);
 }
-function getConversation(projectId, limit) {
-  return db.prepare('SELECT * FROM conversation_turns WHERE project_id=? ORDER BY created_at DESC LIMIT ?').all(projectId, limit || 100);
+function getConversation(projectId, userId, limit) {
+  return db.prepare(`
+    SELECT c.* FROM conversation_turns c
+    JOIN projects p ON c.project_id = p.id
+    WHERE c.project_id=? AND p.user_id=?
+    ORDER BY c.created_at DESC LIMIT ?
+  `).all(projectId, userId, limit || 100);
 }
 function getTaskConversation(taskId, limit) {
   return db.prepare('SELECT * FROM conversation_turns WHERE task_id=? ORDER BY created_at LIMIT ?').all(taskId, limit || 10);
@@ -170,7 +176,7 @@ function deleteProject(projectId) {
 }
 
 module.exports = {
-  createUser, getUser, getUserByEmail,
+  createUser, getUser, getUserByEmail, setActiveProject,
   createProject, getProject, getUserProjects, activateProject, setClarification,
   setCurrentPointers, refreshProgress, completeProject,
   createMilestone, getMilestone, getProjectMilestones, unlockMilestone, completeMilestone, getNextMilestone,
