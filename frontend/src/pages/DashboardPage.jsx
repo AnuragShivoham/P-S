@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useStore } from '../store';
 import { StatusBadge, ProgressBar, Spinner, TermBlock, FolderTree, QAPanel, CodeBlock } from '../components/UI';
+import { Paperclip, X } from 'lucide-react';
 
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
   return (
     <div className="sidebar">
       <div className="sec-title">Milestones</div>
-      {milestones.map(m => (
+      {(Array.isArray(milestones) ? milestones : []).map(m => (
         <div key={m.id} className={`ms-item ${m.status === 'in_progress' ? 'ms-active' : m.status === 'completed' ? 'ms-done' : ''}`}>
           <div className="ms-title" style={{ color: m.status === 'locked' ? 'var(--tx-d)' : 'var(--tx)' }}>
             {m.ord || m.order}. {m.title}
@@ -44,10 +45,20 @@ function Sidebar({ project, milestones, onNew }) {
 function TaskPanel({ task, onSubmit, submitting }) {
   const [sub, setSub] = useState('');
   const [askQ, setAskQ] = useState('');
+  const [askImage, setAskImage] = useState(null);
   const [asking, setAsking] = useState(false);
   const [started, setStarted] = useState(task?.status === 'in_progress');
   const { setCurrentTask, chatLog, addChatMessage } = useStore();
   const navigate = useNavigate();
+
+  const handleAskImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setAskImage(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value = null;
+  };
 
   const chatEndRef = useRef(null);
   useEffect(() => {
@@ -60,11 +71,12 @@ function TaskPanel({ task, onSubmit, submitting }) {
   };
 
   const handleAsk = async () => {
-    if (!askQ.trim()) return;
-    const msg = askQ; setAskQ('');
-    addChatMessage({ role: 'user', content: msg });
+    if (!askQ.trim() && !askImage) return;
+    const msg = askQ; const img = askImage;
+    setAskQ(''); setAskImage(null);
+    addChatMessage({ role: 'user', content: msg, imageUri: img });
     setAsking(true);
-    try { const r = await api.askQuestion(task.id, msg); addChatMessage({ role: 'mentor', content: r.message }); }
+    try { const r = await api.askQuestion(task.id, msg, null, null, img); addChatMessage({ role: 'mentor', content: r.message }); }
     catch (e) { addChatMessage({ role: 'system', content: 'Error: ' + e.message }); }
     setAsking(false);
   };
@@ -103,16 +115,16 @@ function TaskPanel({ task, onSubmit, submitting }) {
         </div>
         <p style={{ fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.7, marginBottom: 14 }}>{task.description}</p>
 
-        {(task.concepts_taught || []).length > 0 && (
+        {(Array.isArray(task.concepts_taught) ? task.concepts_taught : []).length > 0 && (
           <div style={{ marginBottom: 14 }}>
             <label className="lbl">Concepts</label>
-            {task.concepts_taught.map(c => <span key={c} className="chip">{c}</span>)}
+            {(Array.isArray(task.concepts_taught) ? task.concepts_taught : []).map(c => <span key={c} className="chip">{c}</span>)}
           </div>
         )}
-        {(task.commands || []).length > 0 && (
+        {(Array.isArray(task.commands) ? task.commands : []).length > 0 && (
           <div style={{ marginBottom: 14 }}>
             <label className="lbl">Commands</label>
-            <TermBlock lines={task.commands.map(c => `$ ${c}`)} />
+            <TermBlock lines={(Array.isArray(task.commands) ? task.commands : []).map(c => `$ ${c}`)} />
           </div>
         )}
         {task.folder_structure && Object.keys(task.folder_structure).length > 0 && (
@@ -145,7 +157,19 @@ function TaskPanel({ task, onSubmit, submitting }) {
         <div className="card">
           <label className="lbl">Ask for Guidance</label>
           <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Be specific. Vague questions get vague hints.</div>
+          {askImage && (
+            <div style={{ position: 'relative', width: '60px', marginBottom: 8 }}>
+              <img src={askImage} alt="Attachment" style={{ width: '100%', borderRadius: '4px' }} />
+              <button type="button" onClick={() => setAskImage(null)}
+                style={{ position: 'absolute', top: -5, right: -5, background: '#f87171', color: 'white', borderRadius: '50%', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><X size={12} /></button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
+            <label style={{ cursor: 'pointer', color: 'var(--tx-2)', display: 'flex', alignItems: 'center', padding: '0 4px' }} title="Attach Screenshot">
+              <Paperclip size={16} />
+              <input type="file" accept="image/png, image/jpeg, image/webp" style={{ display: 'none' }} onChange={handleAskImageUpload} />
+            </label>
             <input className="input" style={{ flex: 1, padding: '8px 12px' }}
               placeholder="e.g. How do I add middleware? / Why is my route 404?"
               value={askQ} onChange={e => setAskQ(e.target.value)}
@@ -157,11 +181,14 @@ function TaskPanel({ task, onSubmit, submitting }) {
           </div>
           {chatLog.length > 0 && (
             <div className="guidance fade-in" style={{ maxHeight: 350, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingRight: 8 }}>
-              {chatLog.map((m, i) => (
+              {(Array.isArray(chatLog) ? chatLog : []).map((m, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', color: m.role === 'user' ? 'var(--blue)' : 'var(--green)', marginBottom: 4 }}>
                     {m.role === 'mentor' ? 'AI Mentor' : m.role === 'user' ? 'You' : 'System'}
                   </div>
+                  {m.imageUri && (
+                    <img src={m.imageUri} alt="Uploaded" style={{ maxWidth: '120px', borderRadius: '4px', marginBottom: '4px' }} />
+                  )}
                   <div style={{ 
                     background: m.role === 'user' ? 'rgba(91, 138, 245, 0.15)' : 'var(--bg)', 
                     border: '1px solid',
@@ -203,7 +230,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
 function MilestonesTab({ milestones }) {
   return (
     <div>
-      {milestones.map(m => (
+      {(Array.isArray(milestones) ? milestones : []).map(m => (
         <div key={m.id} className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
@@ -234,7 +261,7 @@ function AutomationsTab({ automations = [] }) {
   );
   return (
     <div>
-      {automations.map((a, i) => (
+      {(Array.isArray(automations) ? automations : []).map((a, i) => (
         <div key={i} className="card">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
             <span style={{ background: 'var(--b-dim)', color: 'var(--blue)', border: '1px solid rgba(91,138,245,.2)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
@@ -261,11 +288,21 @@ export default function DashboardPage() {
   const handleSubmit = async (text) => {
     setSubm(true); setError(''); clearQA();
     try {
-      const res = await api.submitTask(currentTask.id, text);
-      applyResponse(res);
-      if (res.action === 'project_complete') { navigate('/complete'); return; }
-      if (res.action === 'milestone_complete' && res.next_task) setSuccessMsg(`Milestone complete → Next: ${res.next_task.title}`);
-      else if (res.action === 'task_guidance' && res.next_task) setSuccessMsg(`✓ Task passed → ${res.next_task.title}`);
+      if (project.is_course) {
+        const res = await api.submitCourseTask(currentTask.id, project.id);
+        if (res.verdict === 'pass') {
+          setSuccessMsg(`✓ Task Passed!`);
+          // Optionally trigger local state refresh if necessary
+        } else {
+          setError(res.feedback || 'Validation failed.');
+        }
+      } else {
+        const res = await api.submitTask(currentTask.id, text);
+        applyResponse(res);
+        if (res.action === 'project_complete') { navigate('/complete'); return; }
+        if (res.action === 'milestone_complete' && res.next_task) setSuccessMsg(`Milestone complete → Next: ${res.next_task.title}`);
+        else if (res.action === 'task_guidance' && res.next_task) setSuccessMsg(`✓ Task passed → ${res.next_task.title}`);
+      }
     } catch (e) { setError(e.message); }
     setSubm(false);
   };

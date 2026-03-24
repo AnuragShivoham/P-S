@@ -7,11 +7,12 @@ import {
     Play, Loader2, Send, Save, FolderOpen, File,
     PanelRightClose, PanelRightOpen, TerminalSquare, AlertCircle,
     FilePlus, FolderPlus, Pencil, Trash2, GitBranchPlus, RefreshCw, ChevronRight, ChevronDown,
-    MessageSquare, Download, Upload
+    MessageSquare, Download, Upload, HardDrive, ArrowLeft, GitCommitHorizontal
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
 import '@xterm/xterm/css/xterm.css';
+import GuidedPanel from '../components/GuidedPanel';
 
 // ─── CONTEXT MENU ─────────────────────────────────────────────────────────────
 function ContextMenu({ x, y, node, onClose, onNewFile, onNewFolder, onRename, onDelete, setImportTarget }) {
@@ -145,7 +146,7 @@ function TreeNode({ node, depth, activeFile, onOpen, onContextMenu, expandedDirs
                     {node.name}
                 </span>
             </div>
-            {node.isDir && isExpanded && (node.children || []).map(child => (
+            {node.isDir && isExpanded && (Array.isArray(node.children) ? node.children : []).map(child => (
                 <TreeNode key={child.path} node={child} depth={depth + 1}
                     activeFile={activeFile} onOpen={onOpen} onContextMenu={onContextMenu}
                     expandedDirs={expandedDirs} toggleDir={toggleDir} />
@@ -196,15 +197,29 @@ export default function IDE() {
     const [showSidebar, setShowSidebar] = useState(true);
     const [showChat, setShowChat] = useState(true);
     const [showTerm, setShowTerm] = useState(true);
+    const [termHeight, setTermHeight] = useState(240);
+    const termDragRef = useRef(null);
 
     // Terminal Refs
     const termRef = useRef(null);
     const wsRef = useRef(null);
-    const xtermRef = useRef(null);
+    const termObjRef = useRef(null); // Renamed from xtermRef
     const fitAddonRef = useRef(null);
     const autoSaveTimeoutRef = useRef(null);
     const fileInputRef = useRef(null);
     const chatEndRef = useRef(null);
+    const explorerRef = useRef(null); // Added
+
+    // [V2 TELEMETRY PRIMITIVES]
+    const behaviorMetrics = useRef({
+      pasteSize: 0,
+      typingSpeed: 0,
+      keystrokeCount: 0,
+      idleTime: 0,
+      sessionStart: Date.now()
+    });
+    const lastKeyTime = useRef(0);
+    const syncTimeoutRef = useRef(null);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -262,6 +277,38 @@ export default function IDE() {
         }
     };
 
+    const handleEditorMount = (editor, monaco) => {
+        editor.onDidChangeModelContent((e) => {
+            if (!project?.is_course) return;
+            e.changes.forEach(change => {
+                if (change.text.length > 20) {
+                    behaviorMetrics.current.pasteSize += change.text.length;
+                    // Force immediate sync on paste
+                    if (change.text.length > 50) syncTelemetry(true);
+                }
+            });
+        });
+
+        editor.onKeyDown((e) => {
+            if (!project?.is_course) return;
+            const now = Date.now();
+            
+            // Idle Trigger Detect
+            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+            syncTimeoutRef.current = setTimeout(() => {
+                syncTelemetry();
+            }, 8000); // 8 seconds idle flush
+
+            if (lastKeyTime.current > 0) {
+                const gap = now - lastKeyTime.current;
+                if (gap < 4000) {
+                    behaviorMetrics.current.typingSpeed += gap;
+                    behaviorMetrics.current.keystrokeCount += 1;
+                }
+            }
+            lastKeyTime.current = now;
+        });
+    };
     const closeFile = (e, path) => {
         e.stopPropagation();
         setOpenFiles(prev => prev.filter(f => f.path !== path));
@@ -273,6 +320,34 @@ export default function IDE() {
         }
     };
 
+    const syncTelemetry = useCallback((force = false) => {
+        if (!project?.is_course || !currentTask) return;
+        
+        const now = Date.now();
+        const metrics = behaviorMetrics.current;
+        let avgSpeed = 0;
+        
+        if (metrics.keystrokeCount > 0) {
+            avgSpeed = Math.round(metrics.typingSpeed / metrics.keystrokeCount);
+        }
+        
+        // Prevent spam
+        if (!force && metrics.pasteSize === 0 && metrics.keystrokeCount === 0) return;
+
+        const timeSpent = Math.round((now - metrics.sessionStart) / 1000);
+        
+        api.logBehavior({
+            taskId: currentTask.id,
+            pasteSize: metrics.pasteSize,
+            typingSpeed: avgSpeed,
+            attempts: 1, 
+            timeSpent: timeSpent
+        }).catch(e => console.error('[Telemetry Sync]', e));
+
+        behaviorMetrics.current = { pasteSize: 0, typingSpeed: 0, keystrokeCount: 0, idleTime: 0, sessionStart: now };
+        lastKeyTime.current = 0;
+    }, [project, currentTask]);
+
     const handleSave = useCallback(async () => {
         const fileToSave = activeFile;
         const content = fileContents[fileToSave?.path];
@@ -282,9 +357,11 @@ export default function IDE() {
             await api.saveFile(fileToSave.path, content);
             setDirtyFiles(prev => { const n = new Set(prev); n.delete(fileToSave.path); return n; });
             status('Saved ' + fileToSave.name);
+            syncTelemetry(true);
         } catch (e) { status('Save failed: ' + e.message, true); }
         setIsSaving(false);
-    }, [activeFile, fileContents, dirtyFiles]);
+    }, [activeFile, fileContents, dirtyFiles, syncTelemetry]);
+
 
     useEffect(() => {
         if (!activeFile || !dirtyFiles.has(activeFile.path)) return;
@@ -396,13 +473,27 @@ export default function IDE() {
         const term = new Terminal({
             theme: { background: '#0a0a0a', foreground: '#e0e0e0', cursor: '#10b981' },
             fontFamily: '"Fira Code", monospace',
-            fontSize: 13, cursorBlink: true
+            fontSize: 13, cursorBlink: true,
+            rightClickSelectsWord: true
         });
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         term.open(termRef.current);
         fitAddon.fit();
-        xtermRef.current = term;
+        termObjRef.current = term;
+        
+        // Phase 8: Terminal Copy Hook (Ctrl+Shift+C)
+        term.attachCustomKeyEventHandler((e) => {
+            if (e.ctrlKey && e.shiftKey && e.code === 'KeyC' && e.type === 'keydown') {
+                const selection = term.getSelection();
+                if (selection) {
+                    navigator.clipboard.writeText(selection);
+                    status('Copied to clipboard');
+                    return false;
+                }
+            }
+            return true;
+        });
         fitAddonRef.current = fitAddon;
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -583,6 +674,86 @@ export default function IDE() {
         }
     };
 
+    // ── Local Storage Save ────────────────────────────────────────────────────
+    const LS_KEY = project ? `amb_workspace_${project.id}` : null;
+
+    const handleSaveLocal = () => {
+        if (!LS_KEY) return status('No active project', true);
+        try {
+            const snapshot = {
+                files: fileContents,
+                openFiles: openFiles.map(f => ({ path: f.path, name: f.name })),
+                activeFilePath: activeFile?.path || null,
+                savedAt: new Date().toISOString()
+            };
+            localStorage.setItem(LS_KEY, JSON.stringify(snapshot));
+            status(`Saved to browser (${Object.keys(fileContents).length} files)`);
+        } catch (err) {
+            status('localStorage save failed: ' + err.message, true);
+        }
+    };
+
+    // Restore from localStorage on mount
+    useEffect(() => {
+        if (!LS_KEY) return;
+        try {
+            const saved = localStorage.getItem(LS_KEY);
+            if (!saved) return;
+            const snapshot = JSON.parse(saved);
+            if (snapshot.files && Object.keys(snapshot.files).length > 0) {
+                setFileContents(prev => ({ ...prev, ...snapshot.files }));
+                if (snapshot.openFiles?.length) {
+                    setOpenFiles(snapshot.openFiles);
+                    if (snapshot.activeFilePath) {
+                        const af = snapshot.openFiles.find(f => f.path === snapshot.activeFilePath);
+                        if (af) setActiveFile(af);
+                    }
+                }
+                console.log(`[IDE] Restored ${Object.keys(snapshot.files).length} files from localStorage (${snapshot.savedAt})`);
+            }
+        } catch (e) {
+            console.warn('[IDE] localStorage restore failed:', e);
+        }
+    }, [LS_KEY]);
+
+    // Auto-save to localStorage every 30 seconds
+    useEffect(() => {
+        if (!LS_KEY) return;
+        const interval = setInterval(() => {
+            try {
+                const fc = fileContents;
+                if (!fc || Object.keys(fc).length === 0) return;
+                const snapshot = {
+                    files: fc,
+                    openFiles: openFiles.map(f => ({ path: f.path, name: f.name })),
+                    activeFilePath: activeFile?.path || null,
+                    savedAt: new Date().toISOString()
+                };
+                localStorage.setItem(LS_KEY, JSON.stringify(snapshot));
+            } catch (e) { /* silently fail */ }
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [LS_KEY, fileContents, openFiles, activeFile]);
+
+    // ── Git Push ──────────────────────────────────────────────────────────────
+    const [gitPushing, setGitPushing] = useState(false);
+    const handleGitPush = async () => {
+        if (!project) return status('No active project', true);
+        setGitPushing(true);
+        status('Pushing to Git...');
+        try {
+            const r = await api.gitPush(`Task checkpoint: ${project.title}`);
+            if (r.pushFailed) {
+                status('Committed locally — push failed (check remote)', true);
+            } else {
+                status(r.message || 'Pushed to Git!');
+            }
+        } catch (err) {
+            status('Git push failed: ' + (err.response?.data?.error || err.message), true);
+        }
+        setGitPushing(false);
+    };
+
     const getLanguage = (name = '') => {
         if (name.endsWith('.jsx') || name.endsWith('.js')) return 'javascript';
         if (name.endsWith('.ts') || name.endsWith('.tsx')) return 'typescript';
@@ -599,12 +770,17 @@ export default function IDE() {
 
             {/* MENU BAR */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#010409', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
+                <button title="← Dashboard" onClick={() => navigate('/')} style={{ ...iconBtn, marginRight: 6 }}><ArrowLeft size={14} /></button>
                 <span style={{ fontWeight: 800, fontSize: 12, color: '#58a6ff', marginRight: 8 }}>AMIT-BODHIT IDE</span>
                 <button title="New File (right-click explorer)" onClick={() => openModal('newFile', { path: '', isDir: true }, 'filename.js')} style={iconBtn}><FilePlus size={14} /></button>
                 <button title="New Folder" onClick={() => openModal('newFolder', { path: '', isDir: true }, 'folder-name')} style={iconBtn}><FolderPlus size={14} /></button>
                 <button title="Import File (Top)" onClick={() => { setImportTarget('/'); document.getElementById('hidden-file-input')?.click(); }} style={iconBtn}><FolderOpen size={14} /></button>
                 <button title="Import Folder" onClick={() => { setImportTarget('/'); document.getElementById('hidden-folder-input')?.click(); }} style={iconBtn}><Upload size={14} /></button>
                 <button title="Export Workspace (ZIP)" onClick={handleDownloadWorkspace} style={iconBtn}><Download size={14} /></button>
+                <button title="Save to Browser (localStorage)" onClick={handleSaveLocal} style={iconBtn}><HardDrive size={14} /></button>
+                <button title="Push to Git (commit + push)" onClick={handleGitPush} disabled={gitPushing} style={{ ...iconBtn, color: gitPushing ? '#8b949e' : '#3fb950' }}>
+                    {gitPushing ? <Loader2 size={14} className="spin" /> : <GitCommitHorizontal size={14} />}
+                </button>
                 <button title="Git Clone" onClick={() => openModal('gitClone', null, 'https://github.com/user/repo.git')} style={iconBtn}><GitBranchPlus size={14} /></button>
                 <button title="Refresh Explorer" onClick={loadFsTree} style={iconBtn}><RefreshCw size={14} /></button>
                 <div style={{ flex: 1 }} />
@@ -633,7 +809,7 @@ export default function IDE() {
                             <button title="Refresh" onClick={loadFsTree} style={smallIconBtn}><RefreshCw size={12} /></button>
                         </div>
                         <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-                            {(fsTree || []).map(node => (
+                            {(Array.isArray(fsTree) ? fsTree : []).map(node => (
                                 <TreeNode key={node.path} node={node} depth={0}
                                     activeFile={activeFile} onOpen={handleOpenFile}
                                     onContextMenu={(e, n) => setCtxMenu({ x: e.clientX, y: e.clientY, node: n })}
@@ -651,7 +827,7 @@ export default function IDE() {
                         <button onClick={() => setShowSidebar(!showSidebar)} style={{ ...iconBtn, borderRight: '1px solid #21262d', borderRadius: 0 }}>
                             {showSidebar ? <PanelRightOpen size={14} /> : <PanelRightOpen size={14} />}
                         </button>
-                        {openFiles.map(f => (
+                        {(Array.isArray(openFiles) ? openFiles : []).map(f => (
                             <div key={f.path} onClick={() => handleOpenFile(f)} style={{
                                 display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px',
                                 cursor: 'pointer', flexShrink: 0, borderRight: '1px solid #21262d',
@@ -682,6 +858,7 @@ export default function IDE() {
                                 language={getLanguage(activeFile.name)}
                                 theme="vs-dark"
                                 value={fileContents[activeFile.path] ?? ''}
+                                onMount={handleEditorMount}
                                 onChange={val => {
                                     setFileContents(prev => ({ ...prev, [activeFile.path]: val }));
                                     setDirtyFiles(prev => new Set(prev).add(activeFile.path));
@@ -698,7 +875,27 @@ export default function IDE() {
 
                     {/* TERMINAL */}
                     {showTerm && (
-                        <div style={{ height: 240, borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                        <div style={{ height: termHeight, borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', flexShrink: 0, position: 'relative' }}>
+                            {/* Drag Handle */}
+                            <div
+                                style={{ height: 5, cursor: 'row-resize', background: 'transparent', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    const startY = e.clientY;
+                                    const startH = termHeight;
+                                    const onMove = (ev) => {
+                                        const diff = startY - ev.clientY;
+                                        setTermHeight(Math.max(100, Math.min(600, startH + diff)));
+                                    };
+                                    const onUp = () => {
+                                        document.removeEventListener('mousemove', onMove);
+                                        document.removeEventListener('mouseup', onUp);
+                                        if (fitAddonRef.current) setTimeout(() => fitAddonRef.current.fit(), 50);
+                                    };
+                                    document.addEventListener('mousemove', onMove);
+                                    document.addEventListener('mouseup', onUp);
+                                }}
+                            />
                             <div style={{ display: 'flex', alignItems: 'center', padding: '3px 12px', background: '#010409', borderBottom: '1px solid #21262d' }}>
                                 <TerminalSquare size={12} style={{ marginRight: 6, color: '#8b949e' }} />
                                 <span style={{ fontSize: 10, color: '#8b949e', flex: 1, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
@@ -706,7 +903,18 @@ export default function IDE() {
                                 </span>
                                 <button onClick={() => setShowTerm(false)} style={{ ...smallIconBtn, color: '#8b949e' }}>×</button>
                             </div>
-                            <div style={{ flex: 1, padding: 6, background: '#0a0a0a', minHeight: 0 }} ref={termRef} />
+                            <div
+                                style={{ flex: 1, padding: 6, background: '#0a0a0a', minHeight: 0 }}
+                                ref={termRef}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    const sel = termObjRef.current?.getSelection();
+                                    if (sel) {
+                                        navigator.clipboard.writeText(sel);
+                                        status('Copied to clipboard');
+                                    }
+                                }}
+                            />
                         </div>
                     )}
                     {!showTerm && (
@@ -721,92 +929,103 @@ export default function IDE() {
                 {/* RIGHT – AI Mentor */}
                 {showChat ? (
                     <div style={{ width: 320, borderLeft: '1px solid #21262d', display: 'flex', flexDirection: 'column', background: '#0d0d0d', flexShrink: 0 }}>
-                        <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>AI MENTOR</span>
-                            <button onClick={() => setShowChat(false)} style={smallIconBtn}><PanelRightClose size={14} /></button>
-                        </div>
-                        {currentTask ? (
-                            <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: '#161b22' }}>
-                                <div style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>CURRENT TASK</div>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>{currentTask.title}</div>
+                        {project?.is_course ? (
+                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                                <GuidedPanel task={currentTask} project={project} />
                             </div>
                         ) : (
-                            <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: 'rgba(248,113,113,0.07)' }}>
-                                <div style={{ fontSize: 11, color: '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <AlertCircle size={13} /> No active task
+                            <>
+                                <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>AI MENTOR</span>
+                                    <button onClick={() => setShowChat(false)} style={smallIconBtn}><PanelRightClose size={14} /></button>
                                 </div>
-                            </div>
-                        )}
-                        <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            {chatLog.length === 0 && (
-                                <div style={{ fontSize: 12, color: '#8b949e', textAlign: 'center', marginTop: 20 }}>
-                                    Ask me anything about your current task!
-                                </div>
-                            )}
-                            {chatLog.map((c, i) => {
-                                const actionMatch = c.content.match(/<ACTION_PLAN>([\s\S]*?)<\/ACTION_PLAN>/);
-                                const cleanContent = c.content.replace(/<ACTION_PLAN>[\s\S]*?<\/ACTION_PLAN>/, '').trim();
-                                let actions = [];
-                                if (actionMatch) {
-                                    try { actions = JSON.parse(actionMatch[1]); } catch(e) { console.error('Failed to parse actions', e); }
-                                }
-
-                                return (
-                                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: c.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                                        <span style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>{c.role === 'user' ? 'You' : 'AMIT-BODHIT'}</span>
-                                        <div style={{
-                                            background: c.role === 'user' ? '#1f6feb' : '#21262d',
-                                            color: c.role === 'user' ? '#fff' : '#e6edf3',
-                                            padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.55,
-                                            maxWidth: '90%', wordBreak: 'break-word', whiteSpace: 'pre-wrap', position: 'relative'
-                                        }}>
-                                            {cleanContent}
-                                            {actions.length > 0 && (
-                                                <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                    <div style={{ fontSize: 9, fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>Suggested Actions</div>
-                                                    {actions.map((act, ai) => (
-                                                        <button 
-                                                            key={ai}
-                                                            onClick={() => handleExecuteAction(act)}
-                                                            style={{ 
-                                                                background: '#30363d', border: '1px solid #444c56', borderRadius: 4, 
-                                                                padding: '4px 8px', fontSize: 11, color: '#e6edf3', cursor: 'pointer',
-                                                                display: 'flex', alignItems: 'center', gap: 6, width: 'fit-content'
-                                                            }}
-                                                        >
-                                                            {act.type === 'terminal' ? <TerminalSquare size={12} /> : <FilePlus size={12} />}
-                                                            {act.type === 'terminal' ? `Run: ${act.command}` : `Create: ${act.path}`}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
+                                {currentTask ? (
+                                    <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: '#161b22' }}>
+                                        <div style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>CURRENT TASK</div>
+                                        <div style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>{currentTask.title}</div>
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: 'rgba(248,113,113,0.07)' }}>
+                                        <div style={{ fontSize: 11, color: '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <AlertCircle size={13} /> No active task
                                         </div>
                                     </div>
-                                );
-                            })}
-                            {isAsking && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8b949e', fontSize: 12 }}>
-                                    <Loader2 size={14} className="spin" /> Mentor is typing…
+                                )}
+                                <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                    {chatLog.length === 0 && (
+                                        <div style={{ fontSize: 12, color: '#8b949e', textAlign: 'center', marginTop: 20 }}>
+                                            Ask me anything about your current task!
+                                        </div>
+                                    )}
+                                    {(Array.isArray(chatLog) ? chatLog : []).map((c, i) => {
+                                        const actionMatch = c.content.match(/<ACTION_PLAN>([\s\S]*?)<\/ACTION_PLAN>/);
+                                        const cleanContent = c.content.replace(/<ACTION_PLAN>[\s\S]*?<\/ACTION_PLAN>/, '').trim();
+                                        let actions = [];
+                                        if (actionMatch) {
+                                            try { 
+                                                const parsed = JSON.parse(actionMatch[1]); 
+                                                actions = Array.isArray(parsed) ? parsed : [parsed];
+                                            } catch(e) { console.error('Failed to parse actions', e); }
+                                        }
+
+                                        return (
+                                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: c.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                                                <span style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>{c.role === 'user' ? 'You' : 'AMIT-BODHIT'}</span>
+                                                <div style={{
+                                                    background: c.role === 'user' ? '#1f6feb' : '#21262d',
+                                                    color: c.role === 'user' ? '#fff' : '#e6edf3',
+                                                    padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.55,
+                                                    maxWidth: '90%', wordBreak: 'break-word', whiteSpace: 'pre-wrap', position: 'relative'
+                                                }}>
+                                                    {cleanContent}
+                                                    {actions.length > 0 && (
+                                                        <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                            <div style={{ fontSize: 9, fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>Suggested Actions</div>
+                                                            {(Array.isArray(actions) ? actions : []).map((act, ai) => (
+                                                                <button 
+                                                                    key={ai}
+                                                                    onClick={() => handleExecuteAction(act)}
+                                                                    style={{ 
+                                                                        background: '#30363d', border: '1px solid #444c56', borderRadius: 4, 
+                                                                        padding: '4px 8px', fontSize: 11, color: '#e6edf3', cursor: 'pointer',
+                                                                        display: 'flex', alignItems: 'center', gap: 6, width: 'fit-content'
+                                                                    }}
+                                                                >
+                                                                    {act.type === 'terminal' ? <TerminalSquare size={12} /> : <FilePlus size={12} />}
+                                                                    {act.type === 'terminal' ? `Run: ${act.command}` : `Create: ${act.path}`}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {isAsking && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8b949e', fontSize: 12 }}>
+                                            <Loader2 size={14} className="spin" /> Mentor is typing…
+                                        </div>
+                                    )}
+                                    <div ref={chatEndRef} />
                                 </div>
-                            )}
-                            <div ref={chatEndRef} />
-                        </div>
-                        <div style={{ padding: 10, borderTop: '1px solid #21262d' }}>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                                <input value={chatInput} onChange={e => setChatInput(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && handleChat()}
-                                    placeholder={currentTask ? "Ask for help or a review…" : "Select a task to start chatting…"}
-                                    style={{ flex: 1, background: '#010409', border: '1px solid #30363d', padding: '7px 10px', borderRadius: 6, color: '#e6edf3', fontSize: 12, outline: 'none' }} />
-                                <button 
-                                    onClick={handleChat} 
-                                    disabled={isAsking || !chatInput.trim() || (!currentTask && !project)}
-                                    title="Send Message"
-                                    style={{ background: '#238636', color: 'white', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: (isAsking || !chatInput.trim() || (!currentTask && !project)) ? 0.5 : 1 }}
-                                >
-                                    <Send size={14} />
-                                </button>
-                            </div>
-                        </div>
+                                <div style={{ padding: 10, borderTop: '1px solid #21262d' }}>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                        <input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && handleChat()}
+                                            placeholder={currentTask ? "Ask for help or a review…" : "Select a task to start chatting…"}
+                                            style={{ flex: 1, background: '#010409', border: '1px solid #30363d', padding: '7px 10px', borderRadius: 6, color: '#e6edf3', fontSize: 12, outline: 'none' }} />
+                                        <button 
+                                            onClick={handleChat} 
+                                            disabled={isAsking || !chatInput.trim() || (!currentTask && !project)}
+                                            title="Send Message"
+                                            style={{ background: '#238636', color: 'white', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: (isAsking || !chatInput.trim() || (!currentTask && !project)) ? 0.5 : 1 }}
+                                        >
+                                            <Send size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 ) : (
                     <div style={{ borderLeft: '1px solid #21262d', background: '#010409', flexShrink: 0 }}>

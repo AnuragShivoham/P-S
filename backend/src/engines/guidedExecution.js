@@ -33,7 +33,7 @@ function formatTree(nodes, indent = '') {
   }).join('\n');
 }
 
-async function getGuidance(task, userQuestion, history = [], activeFileContent = null, activeFilePath = null, project = null, milestones = [], treeNodes = []) {
+async function getGuidance(task, userQuestion, history = [], activeFileContent = null, activeFilePath = null, project = null, milestones = [], treeNodes = [], image = null) {
   const stackList = project?.tech_stack ? (Array.isArray(project.tech_stack) ? project.tech_stack.join(', ') : project.tech_stack) : 'N/A';
   let ctx = `Role: ${project?.user_role || 'Student'}
 Project Name: ${project?.title}
@@ -61,7 +61,7 @@ Commands: ${JSON.stringify(task?.commands||[])}`;
     { role: 'assistant', content: 'Understood. I am your AMIT-BODHIT Mentor. What is your question?' },
     ...history,
   ];
-  return callClaude(GUIDE_SYSTEM, userQuestion, msgs, 800, 0.2);
+  return callClaude(GUIDE_SYSTEM, userQuestion, msgs, 800, 0.2, false, image);
 }
 
 async function getHint(task, attemptNumber) {

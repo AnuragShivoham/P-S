@@ -39,8 +39,8 @@ export const api = {
   getTask: (id) => get(`/tasks/${id}`),
   startTask: (id) => post(`/tasks/${id}/start`),
   getHint: (id) => post(`/tasks/${id}/hint`),
-  askQuestion: (id, q, content, path) => post(`/tasks/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path }),
-  askProjectQuestion: (id, q, content, path) => post(`/projects/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path }),
+  askQuestion: (id, q, content, path, image) => post(`/tasks/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
+  askProjectQuestion: (id, q, content, path, image) => post(`/projects/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
   submitTask: (tid, txt) => post('/tasks/submit', { task_id: tid, submission_text: txt }),
   getFsTree: () => get('/fs/tree'),
   getFile: (path) => get(`/fs/file?path=${encodeURIComponent(path)}`),
@@ -51,6 +51,7 @@ export const api = {
   deleteFile: (path) => req('DELETE', `/fs/file?path=${encodeURIComponent(path)}`),
   renameFile: (oldPath, newPath) => req('PUT', '/fs/rename', { oldPath, newPath }),
   gitClone: (url, targetDir) => post('/fs/git-clone', { url, targetDir }),
+  gitPush: (message) => post('/fs/git-push', { message }),
   authorizeDeletion: (projectId, path) => post('/fs/authorize-deletion', { projectId, path }),
 
   // Auth
@@ -59,4 +60,12 @@ export const api = {
   loginGoogle: (credential, role) => post('/auth/google', { credential, role }),
   updateRole: (role) => req('PUT', '/auth/role', { role }),
   getMe: () => get('/auth/me'),
+
+  // V2 Course API
+  getCourses: () => get('/courses'),
+  getCourse: (id) => get(`/courses/${id}`),
+  startCourse: (id) => post(`/courses/${id}/start`),
+  submitCourseTask: (id, projectId) => post(`/courses/tasks/${id}/submit`, { projectId }),
+  logBehavior: (data) => post('/courses/behavior/log', data),
+  getScaffold: (taskId, projectId) => get(`/courses/tasks/${taskId}/scaffold?projectId=${projectId}`)
 };
