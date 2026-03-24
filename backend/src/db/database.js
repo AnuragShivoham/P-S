@@ -165,6 +165,62 @@ db.exec(`
     expires_at TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  -- [V2 COURSE ENGINE SCHEMA]
+
+  CREATE TABLE IF NOT EXISTS courses (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    tech_stack TEXT,
+    difficulty TEXT,
+    active INTEGER DEFAULT 1,
+    version TEXT DEFAULT '1.0.0',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS course_milestones (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id),
+    title TEXT NOT NULL,
+    order_index INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS course_tasks (
+    id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL REFERENCES course_milestones(id),
+    title TEXT NOT NULL,
+    description TEXT,
+    expected_output TEXT,
+    hints TEXT, 
+    validation_type TEXT,
+    validation_pattern TEXT,
+    order_index INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS course_progress (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    course_task_id TEXT NOT NULL REFERENCES course_tasks(id),
+    status TEXT DEFAULT 'pending',
+    attempts INTEGER DEFAULT 0,
+    submission_text TEXT,
+    completed_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS behavior_logs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    task_id TEXT NOT NULL REFERENCES course_tasks(id),
+    paste_size INTEGER DEFAULT 0,
+    typing_speed INTEGER DEFAULT 0,
+    attempts INTEGER DEFAULT 1,
+    time_spent INTEGER DEFAULT 0,
+    cheat_score INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
 `);
 
 console.log('[DB] Ready (node:sqlite) →', config.DB_PATH);
@@ -186,6 +242,18 @@ if (!cols.includes('google_id')) {
 if (!cols.includes('avatar')) {
   db.exec("ALTER TABLE users ADD COLUMN avatar TEXT");
   console.log('[DB] Migrated: added avatar to users');
+}
+if (!cols.includes('active_project_id')) {
+  db.exec("ALTER TABLE users ADD COLUMN active_project_id TEXT");
+  console.log('[DB] Migrated: added active_project_id to users');
+}
+
+const projInfo = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
+if (!projInfo.includes('is_course')) {
+  db.exec("ALTER TABLE projects ADD COLUMN is_course INTEGER DEFAULT 0");
+  db.exec("ALTER TABLE projects ADD COLUMN course_id TEXT REFERENCES courses(id)");
+  db.exec("ALTER TABLE projects ADD COLUMN course_version TEXT");
+  console.log('[DB] Migrated: added V2 course metadata to projects');
 }
 
 module.exports = db;
