@@ -54,6 +54,21 @@ export const api = {
   gitPush: (message) => post('/fs/git-push', { message }),
   authorizeDeletion: (projectId, path) => post('/fs/authorize-deletion', { projectId, path }),
 
+  // Phase 9: Mentor + Marketplace
+  getActiveProject: () => get('/projects/active'),
+  getCurrentTask: (projectId, taskId) => get(`/tasks/current?projectId=${projectId}&taskId=${taskId}`),
+  learningProcess: (payload) => post('/learning/process', payload),
+
+  // Mentor Intervention Engine
+  getMentorQueue: () => get('/mentor/queue'),
+  getMentorSessionContext: (projectId) => get(`/session/context/${projectId}`),
+  mentorJoinSession: (projectId) => post('/mentor/join', { projectId }),
+  mentorLeaveSession: (projectId) => post('/mentor/leave', { projectId }),
+  requestHelp: (projectId) => post('/task/help', { projectId }),
+  
+  getMarketplace: (q, difficulty) => get(`/marketplace?q=${encodeURIComponent(q || '')}&difficulty=${difficulty || 'all'}`),
+  submitCommunityProject: (data) => post('/projects/community/submit', data),
+
   // Auth
   sendOtp: (email) => post('/auth/send-otp', { email }),
   verifyOtp: (email, otp, name, role) => post('/auth/verify-otp', { email, otp, name, role }),
