@@ -193,6 +193,13 @@ export default function IDE() {
     const [chatInput, setChatInput] = useState('');
     const [isAsking, setIsAsking] = useState(false);
 
+    // --- MOCK LEARNING FLOW STATE ---
+    const [learningMode, setLearningMode] = useState('self'); // self | guided | live
+    const [mockTaskStatus, setMockTaskStatus] = useState('coding'); // coding | failed | solved
+    const [showExplainModal, setShowExplainModal] = useState(false);
+    const [explainText, setExplainText] = useState('');
+    const [liveMentorMessage, setLiveMentorMessage] = useState(null);
+
     // Layout
     const [showSidebar, setShowSidebar] = useState(true);
     const [showChat, setShowChat] = useState(true);
@@ -794,6 +801,7 @@ export default function IDE() {
                 </button>
             </div>
 
+
             {/* MAIN BODY */}
             <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
@@ -929,103 +937,95 @@ export default function IDE() {
                 {/* RIGHT – AI Mentor */}
                 {showChat ? (
                     <div style={{ width: 320, borderLeft: '1px solid #21262d', display: 'flex', flexDirection: 'column', background: '#0d0d0d', flexShrink: 0 }}>
-                        {project?.is_course ? (
-                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                                <GuidedPanel task={currentTask} project={project} />
+                        <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>AI MENTOR</span>
+                            <button onClick={() => setShowChat(false)} style={smallIconBtn}><PanelRightClose size={14} /></button>
+                        </div>
+                        {currentTask ? (
+                            <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: '#161b22' }}>
+                                <div style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>CURRENT TASK</div>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>{currentTask.title}</div>
                             </div>
                         ) : (
-                            <>
-                                <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>AI MENTOR</span>
-                                    <button onClick={() => setShowChat(false)} style={smallIconBtn}><PanelRightClose size={14} /></button>
+                            <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: 'rgba(248,113,113,0.07)' }}>
+                                <div style={{ fontSize: 11, color: '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <AlertCircle size={13} /> No active task
                                 </div>
-                                {currentTask ? (
-                                    <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: '#161b22' }}>
-                                        <div style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>CURRENT TASK</div>
-                                        <div style={{ fontSize: 12, fontWeight: 600, color: '#c9d1d9' }}>{currentTask.title}</div>
-                                    </div>
-                                ) : (
-                                    <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', background: 'rgba(248,113,113,0.07)' }}>
-                                        <div style={{ fontSize: 11, color: '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <AlertCircle size={13} /> No active task
-                                        </div>
-                                    </div>
-                                )}
-                                <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                    {chatLog.length === 0 && (
-                                        <div style={{ fontSize: 12, color: '#8b949e', textAlign: 'center', marginTop: 20 }}>
-                                            Ask me anything about your current task!
-                                        </div>
-                                    )}
-                                    {(Array.isArray(chatLog) ? chatLog : []).map((c, i) => {
-                                        const actionMatch = c.content.match(/<ACTION_PLAN>([\s\S]*?)<\/ACTION_PLAN>/);
-                                        const cleanContent = c.content.replace(/<ACTION_PLAN>[\s\S]*?<\/ACTION_PLAN>/, '').trim();
-                                        let actions = [];
-                                        if (actionMatch) {
-                                            try { 
-                                                const parsed = JSON.parse(actionMatch[1]); 
-                                                actions = Array.isArray(parsed) ? parsed : [parsed];
-                                            } catch(e) { console.error('Failed to parse actions', e); }
-                                        }
-
-                                        return (
-                                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: c.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                                                <span style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>{c.role === 'user' ? 'You' : 'AMIT-BODHIT'}</span>
-                                                <div style={{
-                                                    background: c.role === 'user' ? '#1f6feb' : '#21262d',
-                                                    color: c.role === 'user' ? '#fff' : '#e6edf3',
-                                                    padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.55,
-                                                    maxWidth: '90%', wordBreak: 'break-word', whiteSpace: 'pre-wrap', position: 'relative'
-                                                }}>
-                                                    {cleanContent}
-                                                    {actions.length > 0 && (
-                                                        <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                            <div style={{ fontSize: 9, fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>Suggested Actions</div>
-                                                            {(Array.isArray(actions) ? actions : []).map((act, ai) => (
-                                                                <button 
-                                                                    key={ai}
-                                                                    onClick={() => handleExecuteAction(act)}
-                                                                    style={{ 
-                                                                        background: '#30363d', border: '1px solid #444c56', borderRadius: 4, 
-                                                                        padding: '4px 8px', fontSize: 11, color: '#e6edf3', cursor: 'pointer',
-                                                                        display: 'flex', alignItems: 'center', gap: 6, width: 'fit-content'
-                                                                    }}
-                                                                >
-                                                                    {act.type === 'terminal' ? <TerminalSquare size={12} /> : <FilePlus size={12} />}
-                                                                    {act.type === 'terminal' ? `Run: ${act.command}` : `Create: ${act.path}`}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    {isAsking && (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8b949e', fontSize: 12 }}>
-                                            <Loader2 size={14} className="spin" /> Mentor is typing…
-                                        </div>
-                                    )}
-                                    <div ref={chatEndRef} />
-                                </div>
-                                <div style={{ padding: 10, borderTop: '1px solid #21262d' }}>
-                                    <div style={{ display: 'flex', gap: 6 }}>
-                                        <input value={chatInput} onChange={e => setChatInput(e.target.value)}
-                                            onKeyDown={e => e.key === 'Enter' && handleChat()}
-                                            placeholder={currentTask ? "Ask for help or a review…" : "Select a task to start chatting…"}
-                                            style={{ flex: 1, background: '#010409', border: '1px solid #30363d', padding: '7px 10px', borderRadius: 6, color: '#e6edf3', fontSize: 12, outline: 'none' }} />
-                                        <button 
-                                            onClick={handleChat} 
-                                            disabled={isAsking || !chatInput.trim() || (!currentTask && !project)}
-                                            title="Send Message"
-                                            style={{ background: '#238636', color: 'white', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: (isAsking || !chatInput.trim() || (!currentTask && !project)) ? 0.5 : 1 }}
-                                        >
-                                            <Send size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            </>
+                            </div>
                         )}
+                        <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            {chatLog.length === 0 && (
+                                <div style={{ fontSize: 12, color: '#8b949e', textAlign: 'center', marginTop: 20 }}>
+                                    Ask me anything about your current project!
+                                </div>
+                            )}
+                            {(Array.isArray(chatLog) ? chatLog : []).map((c, i) => {
+                                const actionMatch = c.content.match(/<ACTION_PLAN>([\s\S]*?)<\/ACTION_PLAN>/);
+                                const cleanContent = c.content.replace(/<ACTION_PLAN>[\s\S]*?<\/ACTION_PLAN>/, '').trim();
+                                let actions = [];
+                                if (actionMatch) {
+                                    try { 
+                                        const parsed = JSON.parse(actionMatch[1]); 
+                                        actions = Array.isArray(parsed) ? parsed : [parsed];
+                                    } catch(e) { console.error('Failed to parse actions', e); }
+                                }
+
+                                return (
+                                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: c.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                                        <span style={{ fontSize: 10, color: '#8b949e', marginBottom: 3 }}>{c.role === 'user' ? 'You' : 'AMIT-BODHIT'}</span>
+                                        <div style={{
+                                            background: c.role === 'user' ? '#1f6feb' : '#21262d',
+                                            color: c.role === 'user' ? '#fff' : '#e6edf3',
+                                            padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.55,
+                                            maxWidth: '90%', wordBreak: 'break-word', whiteSpace: 'pre-wrap', position: 'relative'
+                                        }}>
+                                            {cleanContent}
+                                            {actions.length > 0 && (
+                                                <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    <div style={{ fontSize: 9, fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>Suggested Actions</div>
+                                                    {(Array.isArray(actions) ? actions : []).map((act, ai) => (
+                                                        <button 
+                                                            key={ai}
+                                                            onClick={() => handleExecuteAction(act)}
+                                                            style={{ 
+                                                                background: '#30363d', border: '1px solid #444c56', borderRadius: 4, 
+                                                                padding: '4px 8px', fontSize: 11, color: '#e6edf3', cursor: 'pointer',
+                                                                display: 'flex', alignItems: 'center', gap: 6, width: 'fit-content'
+                                                            }}
+                                                        >
+                                                            {act.type === 'terminal' ? <TerminalSquare size={12} /> : <FilePlus size={12} />}
+                                                            {act.type === 'terminal' ? `Run: ${act.command}` : `Create: ${act.path}`}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {isAsking && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8b949e', fontSize: 12 }}>
+                                    <Loader2 size={14} className="spin" /> Mentor is typing…
+                                </div>
+                            )}
+                            <div ref={chatEndRef} />
+                        </div>
+                        <div style={{ padding: 10, borderTop: '1px solid #21262d' }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleChat()}
+                                    placeholder={currentTask ? "Ask for help or a review…" : "Select a task to start chatting…"}
+                                    style={{ flex: 1, background: '#010409', border: '1px solid #30363d', padding: '7px 10px', borderRadius: 6, color: '#e6edf3', fontSize: 12, outline: 'none' }} />
+                                <button 
+                                    onClick={handleChat} 
+                                    disabled={isAsking || !chatInput.trim()}
+                                    title="Send Message"
+                                    style={{ background: '#238636', color: 'white', border: 'none', borderRadius: 6, padding: '0 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: (isAsking || !chatInput.trim()) ? 0.5 : 1 }}
+                                >
+                                    <Send size={14} />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 ) : (
                     <div style={{ borderLeft: '1px solid #21262d', background: '#010409', flexShrink: 0 }}>
@@ -1080,6 +1080,8 @@ export default function IDE() {
                     </div>
                 </div>
             )}
+
+
             {/* HIDDEN INPUTS */}
             <input type="file" id="hidden-file-input" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
             <input type="file" id="hidden-folder-input" webkitdirectory="" directory="" onChange={handleFileUpload} style={{ display: 'none' }} />

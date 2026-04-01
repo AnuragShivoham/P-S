@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useStore } from '../store';
 import { StatusBadge, ProgressBar, Spinner, TermBlock, FolderTree, QAPanel, CodeBlock } from '../components/UI';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, X, ShieldAlert, Zap } from 'lucide-react';
+import MentorDashboard from '../components/mentor/MentorDashboard';
 
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
@@ -146,8 +147,18 @@ function TaskPanel({ task, onSubmit, submitting }) {
             <button className="btn btn-p" onClick={handleStart}>Start Task →</button>
           </div>
         ) : (
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 14, display: 'flex', gap: 12, alignItems: 'center' }}>
             <button className="btn btn-p" onClick={() => navigate('/ide')}>Open IDE Mode</button>
+            <button 
+                className="btn btn-g" 
+                onClick={async () => {
+                    await api.requestHelp(project.id);
+                    alert("SOS sent! A mentor has been pinged and will review your session.");
+                }} 
+                style={{ background: '#f85149', color: '#fff', border: 'none' }}
+            >
+                <ShieldAlert size={14} style={{ marginRight: 6 }}/> Request Live Mentor
+            </button>
           </div>
         )}
       </div>
@@ -280,10 +291,14 @@ function AutomationsTab({ automations = [] }) {
 // ─── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { project, milestones, currentTask, chatLog, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
+  const { project, user, milestones, currentTask, chatLog, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
   const [tab, setTab] = useState('task');
   const [submitting, setSubm] = useState(false);
   const [error, setError] = useState('');
+
+  if (user?.role === 'mentor') {
+      return <MentorDashboard />;
+  }
 
   const handleSubmit = async (text) => {
     setSubm(true); setError(''); clearQA();

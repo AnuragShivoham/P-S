@@ -12,6 +12,9 @@ import CompletePage from './pages/CompletePage';
 import IdePage from './pages/IdePage';
 import LoginPage from './pages/LoginPage';
 import ProjectsPage from './pages/ProjectsPage';
+import MentorPage from './pages/MentorPage';
+import MarketplacePage from './pages/MarketplacePage';
+import ProjectDetailPage from './pages/ProjectDetailPage';
 
 function Header() {
   const location = useLocation();
@@ -22,25 +25,36 @@ function Header() {
 
   if (onLogin || location.pathname === '/ide') return null;
 
+  const navBtn = (label, path) => ({
+    background: location.pathname === path ? 'rgba(88,166,255,0.15)' : 'none',
+    border: location.pathname === path ? '1px solid rgba(88,166,255,0.3)' : '1px solid transparent',
+    color: location.pathname === path ? '#58a6ff' : 'var(--tx-m)',
+    cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, fontFamily: 'var(--sans)'
+  });
+
   return (
     <header className="hdr">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/projects')}>
         <div className="logo">AMIT-BODHIT</div>
-        <div className="logo-sub">AI Project Mentor</div>
+        <div className="logo-sub">AI Development Hub</div>
       </div>
       
+      {token && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
+          <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Dashboard</button>
+          <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
+        </div>
+      )}
+
       {project && onDash && (
-        <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 16 }}>
           <span className="hdr-sep">›</span>
           <span className="hdr-crumb">{project.title}</span>
           <StatusBadge status={project.status} />
-          <div style={{ flex: 1, maxWidth: 140, marginLeft: 'auto' }}>
+          <div style={{ flex: 1, minWidth: 100, marginLeft: 10 }}>
             <ProgressBar pct={project.progress_pct || 0} />
           </div>
-          <span style={{ fontSize: 10, color: 'var(--tx-m)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
-            {Math.round(project.progress_pct || 0)}%
-          </span>
-        </>
+        </div>
       )}
 
       {token && (
@@ -145,7 +159,11 @@ function AppInner() {
         <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />
+        <Route path="/mentor" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
+        <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
         <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </div>
   );
