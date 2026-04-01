@@ -52,11 +52,15 @@ class WorkspaceService {
    * Validate file path is within project
    */
   static validateFilePath(projectId, filePath) {
+    if (path.isAbsolute(filePath)) {
+      throw new Error('Security Violation: Absolute paths are strictly forbidden.');
+    }
+
     const projectPath = this.getProjectPath(projectId);
     const fullPath = path.resolve(path.join(projectPath, filePath));
     
     if (!fullPath.startsWith(projectPath)) {
-      throw new Error('Path traversal not allowed');
+      throw new Error('Security Violation: Path traversal attempt detected.');
     }
     
     return fullPath;
@@ -277,6 +281,25 @@ ReactDOM.render(<App />, document.getElementById('root'));
     });
 
     return { projectId, template, initialized: true };
+  }
+
+  /**
+   * Inject task-specific starter code (if file doesn't exist)
+   */
+  static injectStarter(projectId, task) {
+    if (!task || !task.file_path || !task.starter_template) return;
+
+    try {
+      const fullPath = this.validateFilePath(projectId, task.file_path);
+      
+      // ONLY inject if file does NOT exist (protection against overwriting user work)
+      if (!fs.existsSync(fullPath)) {
+        console.log(`[Workspace] Injecting starter for ${task.file_path}`);
+        this.writeFile(projectId, task.file_path, task.starter_template);
+      }
+    } catch (e) {
+      console.error('[Workspace] Starter injection failed:', e.message);
+    }
   }
 
   /**

@@ -39,23 +39,12 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    raw_goal TEXT NOT NULL,
-    title TEXT,
-    tech_stack TEXT DEFAULT '[]',
-    scope TEXT,
-    deadline_days INTEGER,
-    skill_level TEXT,
-    deliverables TEXT DEFAULT '[]',
-    status TEXT DEFAULT 'clarifying',
-    clarification_round INTEGER DEFAULT 0,
-    clarification_history TEXT DEFAULT '[]',
-    current_milestone_id TEXT,
-    current_task_id TEXT,
-    progress_pct REAL DEFAULT 0,
-    total_tasks INTEGER DEFAULT 0,
-    completed_tasks INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    raw_goal TEXT,
+    course_id TEXT REFERENCES courses(id),
+    is_course INTEGER DEFAULT 0,
+    course_version INTEGER,
+    status TEXT DEFAULT 'active', -- active/completed
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS milestones (
@@ -172,53 +161,107 @@ db.exec(`
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
-    tech_stack TEXT,
     difficulty TEXT,
-    active INTEGER DEFAULT 1,
-    version TEXT DEFAULT '1.0.0',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    tech_stack TEXT,
+    estimated_hours INTEGER,
+    popularity INTEGER DEFAULT 0,
+    completion_rate REAL DEFAULT 0,
+    difficulty_score INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    version INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS course_milestones (
     id TEXT PRIMARY KEY,
-    course_id TEXT NOT NULL REFERENCES courses(id),
-    title TEXT NOT NULL,
-    order_index INTEGER NOT NULL
+    course_id TEXT REFERENCES courses(id),
+    title TEXT,
+    position INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS course_tasks (
     id TEXT PRIMARY KEY,
-    milestone_id TEXT NOT NULL REFERENCES course_milestones(id),
-    title TEXT NOT NULL,
+    course_id TEXT REFERENCES courses(id),
+    milestone_id TEXT REFERENCES course_milestones(id),
+    title TEXT,
     description TEXT,
-    expected_output TEXT,
-    hints TEXT, 
-    validation_type TEXT,
-    validation_pattern TEXT,
-    order_index INTEGER NOT NULL
+    position INTEGER,
+    validation_type TEXT, -- static / regex / custom
+    validation_rules TEXT, -- JSON rules
+    hints TEXT, -- JSON array
+    starter_template TEXT,
+    folder_structure TEXT,
+    file_path TEXT,
+    version INTEGER DEFAULT 1,
+    estimated_minutes INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS course_progress (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    course_task_id TEXT NOT NULL REFERENCES course_tasks(id),
-    status TEXT DEFAULT 'pending',
+    user_id TEXT REFERENCES users(id),
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES course_tasks(id),
+    status TEXT DEFAULT 'pending', -- pending / completed
     attempts INTEGER DEFAULT 0,
-    submission_text TEXT,
-    completed_at TEXT
+    last_scaffold_level INTEGER DEFAULT 1,
+    last_hint_used INTEGER DEFAULT 0,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    help_requested INTEGER DEFAULT 0,
+    active_mentor_id TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS behavior_logs (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
     task_id TEXT NOT NULL REFERENCES course_tasks(id),
-    paste_size INTEGER DEFAULT 0,
-    typing_speed INTEGER DEFAULT 0,
-    attempts INTEGER DEFAULT 1,
-    time_spent INTEGER DEFAULT 0,
-    cheat_score INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
+    cheat_score INTEGER,
+    paste_score INTEGER,
+    typing_pattern INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS user_skills (
+    user_id TEXT PRIMARY KEY REFERENCES users(id),
+    fundamentals REAL DEFAULT 0,
+    syntax REAL DEFAULT 0,
+    problem_solving REAL DEFAULT 0,
+    debugging REAL DEFAULT 0,
+    system_design REAL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- [PHASE 9: MARKETPLACE + CONTROLLED EXECUTION]
+
+  CREATE TABLE IF NOT EXISTS community_projects (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    tech_stack TEXT DEFAULT '[]',
+    difficulty TEXT DEFAULT 'intermediate',
+    final_outcome TEXT,
+    estimated_hours REAL DEFAULT 10,
+    status TEXT DEFAULT 'pending',
+    structured_data TEXT,
+    rejection_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    reviewed_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS hint_requests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    task_id TEXT NOT NULL,
+    requested_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
 `);
@@ -254,6 +297,83 @@ if (!projInfo.includes('is_course')) {
   db.exec("ALTER TABLE projects ADD COLUMN course_id TEXT REFERENCES courses(id)");
   db.exec("ALTER TABLE projects ADD COLUMN course_version TEXT");
   console.log('[DB] Migrated: added V2 course metadata to projects');
+}
+
+// [V2 COURSE ENGINE MIGRATIONS (PHASE 10)]
+const cmInfo = db.prepare("PRAGMA table_info(course_milestones)").all().map(c => c.name);
+if (cmInfo.includes('order_index') && !cmInfo.includes('position')) {
+  db.exec("ALTER TABLE course_milestones RENAME COLUMN order_index TO position");
+  console.log('[DB] Migrated: course_milestones (order_index -> position)');
+}
+
+const ctInfo = db.prepare("PRAGMA table_info(course_tasks)").all().map(c => c.name);
+if (ctInfo.includes('order_index') && !ctInfo.includes('position')) {
+  db.exec("ALTER TABLE course_tasks RENAME COLUMN order_index TO position");
+  console.log('[DB] Migrated: course_tasks (order_index -> position)');
+}
+if (!ctInfo.includes('validation_rules')) db.exec("ALTER TABLE course_tasks ADD COLUMN validation_rules TEXT");
+if (!ctInfo.includes('hints'))            db.exec("ALTER TABLE course_tasks ADD COLUMN hints TEXT");
+if (!ctInfo.includes('starter_template')) db.exec("ALTER TABLE course_tasks ADD COLUMN starter_template TEXT");
+if (!ctInfo.includes('folder_structure')) db.exec("ALTER TABLE course_tasks ADD COLUMN folder_structure TEXT");
+if (!ctInfo.includes('file_path'))        db.exec("ALTER TABLE course_tasks ADD COLUMN file_path TEXT");
+if (!ctInfo.includes('version'))          db.exec("ALTER TABLE course_tasks ADD COLUMN version INTEGER DEFAULT 1");
+if (!ctInfo.includes('estimated_minutes')) db.exec("ALTER TABLE course_tasks ADD COLUMN estimated_minutes INTEGER");
+if (!ctInfo.includes('course_id'))        db.exec("ALTER TABLE course_tasks ADD COLUMN course_id TEXT REFERENCES courses(id)");
+if (ctInfo.includes('validation_pattern')) {
+  // Optional: Rename or drop if not needed, but for now we leave it
+}
+
+const cInfo = db.prepare("PRAGMA table_info(courses)").all().map(c => c.name);
+if (!cInfo.includes('is_active')) {
+  if (cInfo.includes('active')) {
+    db.exec("ALTER TABLE courses RENAME COLUMN active TO is_active");
+  } else {
+    db.exec("ALTER TABLE courses ADD COLUMN is_active INTEGER DEFAULT 1");
+  }
+}
+if (!cInfo.includes('estimated_hours')) {
+  db.exec("ALTER TABLE courses ADD COLUMN estimated_hours INTEGER");
+}
+if (!cInfo.includes('popularity')) {
+  db.exec("ALTER TABLE courses ADD COLUMN popularity INTEGER DEFAULT 0");
+  db.exec("ALTER TABLE courses ADD COLUMN completion_rate REAL DEFAULT 0");
+  db.exec("ALTER TABLE courses ADD COLUMN difficulty_score INTEGER DEFAULT 0");
+}
+if (!cInfo.includes('version')) {
+  db.exec("ALTER TABLE courses ADD COLUMN version INTEGER DEFAULT 1");
+} else {
+  // SQLite doesn't support easy type conversion, but if it was TEXT '1.0.0', we might want to be careful.
+  // For now, we assume it's newly created or fresh.
+}
+
+const cpInfo = db.prepare("PRAGMA table_info(course_progress)").all().map(c => c.name);
+if (cpInfo.includes('course_task_id') && !cpInfo.includes('task_id')) {
+  db.exec("ALTER TABLE course_progress RENAME COLUMN course_task_id TO task_id");
+  console.log('[DB] Migrated: course_progress (course_task_id -> task_id)');
+}
+if (!cpInfo.includes('user_id')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN user_id TEXT REFERENCES users(id)");
+  db.exec("ALTER TABLE course_progress ADD COLUMN last_scaffold_level INTEGER DEFAULT 1");
+  db.exec("ALTER TABLE course_progress ADD COLUMN last_hint_used INTEGER DEFAULT 0");
+  db.exec("ALTER TABLE course_progress ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+}
+if (!cpInfo.includes('completed_at')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN completed_at DATETIME");
+}
+if (!cpInfo.includes('started_at')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN started_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+}
+if (!cpInfo.includes('help_requested')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN help_requested INTEGER DEFAULT 0");
+}
+if (!cpInfo.includes('active_mentor_id')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN active_mentor_id TEXT");
+}
+if (!cpInfo.includes('last_help_request')) {
+  db.exec("ALTER TABLE course_progress ADD COLUMN last_help_request DATETIME");
+  db.exec("ALTER TABLE course_progress ADD COLUMN failure_consistency INTEGER DEFAULT 0");
+  db.exec("ALTER TABLE course_progress ADD COLUMN last_error_hash TEXT");
+  db.exec("ALTER TABLE course_progress ADD COLUMN interventions_count INTEGER DEFAULT 0");
 }
 
 module.exports = db;
