@@ -4,24 +4,26 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 function getActiveCourses() {
-  return db.prepare('SELECT * FROM courses WHERE active = 1').all();
+  return db.prepare('SELECT * FROM courses WHERE is_active = 1').all();
 }
 
 function getCourse(id) {
   return db.prepare('SELECT * FROM courses WHERE id = ?').get(id);
 }
 
-function getCourseFullStructure(courseId) {
+function getCourseFullStructure(courseId, version = 1) {
   const course = getCourse(courseId);
   if (!course) return null;
   
-  const milestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY order_index ASC').all(courseId);
+  const milestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY position ASC').all(courseId);
+  
+  // Rule: Master tasks are filtered by version to ensure project immutability
   const tasks = db.prepare(`
     SELECT t.* FROM course_tasks t
     JOIN course_milestones m ON t.milestone_id = m.id
-    WHERE m.course_id = ?
-    ORDER BY m.order_index ASC, t.order_index ASC
-  `).all(courseId);
+    WHERE m.course_id = ? AND t.version = ?
+    ORDER BY m.position ASC, t.position ASC
+  `).all(courseId, version);
   
   return { course, milestones, tasks };
 }
