@@ -37,7 +37,7 @@ export const api = {
   getAutomations: (pid) => get(`/projects/${pid}/automations`),
   getMilestoneTasks: (mid) => get(`/milestones/${mid}/tasks`),
   getTask: (id) => get(`/tasks/${id}`),
-  startTask: (id) => post(`/tasks/${id}/start`),
+  startTask: (id, projectId) => post(`/tasks/${id}/start`, { projectId }),
   getHint: (id) => post(`/tasks/${id}/hint`),
   askQuestion: (id, q, content, path, image) => post(`/tasks/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
   askProjectQuestion: (id, q, content, path, image) => post(`/projects/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
@@ -82,5 +82,18 @@ export const api = {
   startCourse: (id) => post(`/courses/${id}/start`),
   submitCourseTask: (id, projectId) => post(`/courses/tasks/${id}/submit`, { projectId }),
   logBehavior: (data) => post('/courses/behavior/log', data),
-  getScaffold: (taskId, projectId) => get(`/courses/tasks/${taskId}/scaffold?projectId=${projectId}`)
+  getScaffold: (taskId, projectId) => get(`/courses/tasks/${taskId}/scaffold?projectId=${projectId}`),
+
+  // Course Builder (Mentor)
+  builderCreateCourse: (data) => post('/builder/course', data),
+  builderUpdateCourse: (id, data) => req('PUT', `/builder/course/${id}`, data),
+  builderGetCourse: (id) => get(`/builder/course/${id}`),
+  builderListCourses: () => get('/builder/courses'),
+  builderAddMilestone: (courseId, data) => post(`/builder/course/${courseId}/milestone`, data),
+  builderUpdateMilestone: (id, data) => req('PUT', `/builder/milestone/${id}`, data),
+  builderDeleteMilestone: (id) => req('DELETE', `/builder/milestone/${id}`),
+  builderAddTask: (milestoneId, data) => post(`/builder/milestone/${milestoneId}/task`, data),
+  builderUpdateTask: (id, data) => req('PUT', `/builder/task/${id}`, data),
+  builderDeleteTask: (id) => req('DELETE', `/builder/task/${id}`),
+  builderPublishCourse: (id) => post(`/builder/course/${id}/publish`),
 };

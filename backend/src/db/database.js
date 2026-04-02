@@ -169,6 +169,9 @@ db.exec(`
     difficulty_score INTEGER DEFAULT 0,
     is_active INTEGER DEFAULT 1,
     version INTEGER DEFAULT 1,
+    badge TEXT DEFAULT 'official',
+    source TEXT DEFAULT 'official',
+    creator_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -341,10 +344,14 @@ if (!cInfo.includes('popularity')) {
 }
 if (!cInfo.includes('version')) {
   db.exec("ALTER TABLE courses ADD COLUMN version INTEGER DEFAULT 1");
-} else {
-  // SQLite doesn't support easy type conversion, but if it was TEXT '1.0.0', we might want to be careful.
-  // For now, we assume it's newly created or fresh.
 }
+
+if (!cInfo.includes('badge')) db.exec("ALTER TABLE courses ADD COLUMN badge TEXT DEFAULT 'official'");
+if (!cInfo.includes('source')) db.exec("ALTER TABLE courses ADD COLUMN source TEXT DEFAULT 'official'");
+if (!cInfo.includes('creator_id')) db.exec("ALTER TABLE courses ADD COLUMN creator_id TEXT");
+
+db.exec("UPDATE courses SET badge = 'official' WHERE badge IS NULL");
+db.exec("UPDATE courses SET source = 'official' WHERE source IS NULL");
 
 const cpInfo = db.prepare("PRAGMA table_info(course_progress)").all().map(c => c.name);
 if (cpInfo.includes('course_task_id') && !cpInfo.includes('task_id')) {
@@ -375,5 +382,22 @@ if (!cpInfo.includes('last_help_request')) {
   db.exec("ALTER TABLE course_progress ADD COLUMN last_error_hash TEXT");
   db.exec("ALTER TABLE course_progress ADD COLUMN interventions_count INTEGER DEFAULT 0");
 }
+
+// [COURSE BUILDER SCHEMA EXTENSIONS]
+const courseInfo = db.prepare("PRAGMA table_info(courses)").all().map(c => c.name);
+if (!courseInfo.includes('creator_id'))      db.exec("ALTER TABLE courses ADD COLUMN creator_id TEXT REFERENCES users(id)");
+if (!courseInfo.includes('learning_outcome')) db.exec("ALTER TABLE courses ADD COLUMN learning_outcome TEXT");
+if (!courseInfo.includes('status'))          db.exec("ALTER TABLE courses ADD COLUMN status TEXT DEFAULT 'draft'");
+
+const cmInfo2 = db.prepare("PRAGMA table_info(course_milestones)").all().map(c => c.name);
+if (!cmInfo2.includes('description'))  db.exec("ALTER TABLE course_milestones ADD COLUMN description TEXT");
+if (!cmInfo2.includes('duration_days')) db.exec("ALTER TABLE course_milestones ADD COLUMN duration_days INTEGER DEFAULT 7");
+
+const ctInfo2 = db.prepare("PRAGMA table_info(course_tasks)").all().map(c => c.name);
+if (!ctInfo2.includes('concepts'))    db.exec("ALTER TABLE course_tasks ADD COLUMN concepts TEXT DEFAULT '[]'");
+if (!ctInfo2.includes('steps'))       db.exec("ALTER TABLE course_tasks ADD COLUMN steps TEXT DEFAULT '[]'");
+if (!ctInfo2.includes('difficulty'))   db.exec("ALTER TABLE course_tasks ADD COLUMN difficulty TEXT DEFAULT 'easy'");
+if (!ctInfo2.includes('goal'))        db.exec("ALTER TABLE course_tasks ADD COLUMN goal TEXT");
+if (!ctInfo2.includes('commands'))    db.exec("ALTER TABLE course_tasks ADD COLUMN commands TEXT DEFAULT '[]'");
 
 module.exports = db;

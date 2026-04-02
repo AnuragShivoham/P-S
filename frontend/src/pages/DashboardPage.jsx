@@ -10,6 +10,13 @@ import MentorDashboard from '../components/mentor/MentorDashboard';
 function Sidebar({ project, milestones, onNew }) {
   return (
     <div className="sidebar">
+      <div style={{ padding: '0 0 20px 0', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
+        <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>CURRENT PROJECT</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tx)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+           {project?.title || project?.raw_goal || 'Untitled'}
+        </div>
+      </div>
+
       <div className="sec-title">Milestones</div>
       {(Array.isArray(milestones) ? milestones : []).map(m => (
         <div key={m.id} className={`ms-item ${m.status === 'in_progress' ? 'ms-active' : m.status === 'completed' ? 'ms-done' : ''}`}>
@@ -24,19 +31,42 @@ function Sidebar({ project, milestones, onNew }) {
       ))}
 
       {project && (
-        <div style={{ marginTop: 20 }}>
-          <div className="sec-title">Stack</div>
-          <div style={{ marginBottom: 10 }}>{(project.tech_stack || []).map(t => <span key={t} className="stag">{t}</span>)}</div>
-          <div style={{ fontSize: 10, color: 'var(--tx-d)', lineHeight: 2 }}>
-            <div>⏱ {project.deadline_days || 0} days</div>
-            <div>⚡ {project.skill_level || 'Unknown'}</div>
-            <div>✓ {project.completed_tasks || 0}/{project.total_tasks || 0} tasks</div>
+        <div style={{ marginTop: 24, padding: '16px', borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--border)' }}>
+          <div className="sec-title" style={{ marginBottom: 12 }}>Details</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>PROJECT TYPE</div>
+              <span style={{ 
+                fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 4, 
+                background: project.is_course ? 'rgba(56, 139, 253, 0.15)' : 'rgba(163, 113, 247, 0.15)',
+                color: project.is_course ? 'var(--blue)' : 'var(--purple)',
+                border: '1px solid currentColor'
+              }}>
+                {project.is_course ? '🔵 MARKETPLACE' : '🟣 OWN PROJECT'}
+              </span>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>STACK</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {(project.tech_stack || []).map(t => <span key={t} className="stag">{t}</span>)}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase' }}>DEADLINE</div>
+                <div style={{ fontSize: 12, color: 'var(--tx)' }}>{project.deadline_days || 0}d</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase' }}>TASKS</div>
+                <div style={{ fontSize: 12, color: 'var(--tx)' }}>{project.completed_tasks || 0}/{project.total_tasks || 0}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       <div style={{ marginTop: 20 }}>
-        <button className="btn btn-g btn-sm" style={{ width: '100%' }} onClick={onNew}>+ New Project</button>
+        <button className="btn btn-g btn-sm" style={{ width: '100%', padding: '10px' }} onClick={onNew}>+ New Project</button>
       </div>
     </div>
   );
@@ -48,8 +78,12 @@ function TaskPanel({ task, onSubmit, submitting }) {
   const [askQ, setAskQ] = useState('');
   const [askImage, setAskImage] = useState(null);
   const [asking, setAsking] = useState(false);
-  const [started, setStarted] = useState(task?.status === 'in_progress');
+  const [started, setStarted] = useState(false);
   const { setCurrentTask, chatLog, addChatMessage } = useStore();
+
+  useEffect(() => {
+    if (task?.status === 'in_progress') setStarted(true);
+  }, [task]);
   const navigate = useNavigate();
 
   const handleAskImageUpload = (e) => {
@@ -67,8 +101,16 @@ function TaskPanel({ task, onSubmit, submitting }) {
   }, [chatLog]);
 
   const handleStart = async () => {
-    try { const r = await api.startTask(task.id); setCurrentTask(r.task); setStarted(true); }
-    catch (e) { console.error(e); }
+    try { 
+      const { projectId } = useStore.getState();
+      const r = await api.startTask(task.id, projectId); 
+      setCurrentTask(r.task); 
+      setStarted(true); 
+    }
+    catch (e) { 
+      console.error(e); 
+      alert("Error starting task: " + e.message);
+    }
   };
 
   const handleAsk = async () => {
@@ -291,12 +333,12 @@ function AutomationsTab({ automations = [] }) {
 // ─── DASHBOARD PAGE ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { project, user, milestones, currentTask, chatLog, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
+  const { project, role, milestones, currentTask, chatLog, qaReview, automations, successMsg, applyResponse, clearQA, reset, setSuccessMsg } = useStore();
   const [tab, setTab] = useState('task');
   const [submitting, setSubm] = useState(false);
   const [error, setError] = useState('');
 
-  if (user?.role === 'mentor') {
+  if (role === 'mentor' && !project) {
       return <MentorDashboard />;
   }
 
@@ -334,12 +376,31 @@ export default function DashboardPage() {
       <Sidebar project={project} milestones={milestones} onNew={() => { reset(); navigate('/'); }} />
       <div className="dash-main">
 
-        {/* Progress strip */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-          <ProgressBar pct={project.progress_pct || 0} />
-          <span style={{ fontSize: 11, color: 'var(--tx-m)', whiteSpace: 'nowrap' }}>
-            {Math.round(project.progress_pct || 0)}% · {project.completed_tasks}/{project.total_tasks} tasks
-          </span>
+        {/* Project Context Header */}
+        <div style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ 
+              fontSize: 10, fontWeight: 900, padding: '2px 6px', borderRadius: 4, 
+              background: project.is_course ? 'rgba(56, 139, 253, 0.15)' : 'rgba(163, 113, 247, 0.15)',
+              color: project.is_course ? 'var(--blue)' : 'var(--purple)',
+              border: '1px solid currentColor',
+              letterSpacing: '0.05em'
+            }}>
+              {project.is_course ? 'MARKETPLACE' : 'PERSONAL'}
+            </span>
+            <div style={{ fontSize: 11, color: 'var(--tx-d)', fontWeight: 700 }}>PROJECT: {project.id.slice(0,8).toUpperCase()}</div>
+          </div>
+          
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--tx)', margin: '0 0 16px 0', fontFamily: 'var(--sans)' }}>
+            {project.title || project.raw_goal}
+          </h1>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <ProgressBar pct={project.progress_pct || 0} />
+            <span style={{ fontSize: 11, color: 'var(--tx-m)', fontWeight: 700 }}>
+              {Math.round(project.progress_pct || 0)}% Complete
+            </span>
+          </div>
         </div>
 
         {successMsg && <div className="succ slide-down" style={{ marginBottom: 14, borderRadius: 8 }}>✓ {successMsg}</div>}

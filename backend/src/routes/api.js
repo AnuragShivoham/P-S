@@ -153,7 +153,7 @@ router.get('/courses', wrap(async (req, res) => {
 
 router.get('/courses/:id', wrap(async (req, res) => {
   const structure = courseService.getCourseFullStructure(req.params.id);
-  if (!structure || !structure.course.active) {
+  if (!structure || !structure.course || !structure.course.is_active) {
     return res.status(404).json({ error: 'Course inactive or not found' });
   }
   res.json(structure);
@@ -319,7 +319,8 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
   const state = tracker.getResumeState(req.params.id);
   if (!state) return res.status(404).json({ error: 'Project not found' });
   
-  const { project, milestone, task } = state;
+  const { project } = state;
+  let { milestone, task } = state;
   const projectOwner = db.prepare('SELECT role FROM users WHERE id = ?').get(project.user_id);
   const isOwner = project.user_id === req.user.id;
   const isMentorOwner = projectOwner?.role === 'mentor';
@@ -331,6 +332,88 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
 
   tracker.setActiveProject(req.user.id, project.id);
 
+  // COURSE PROJECT: Fetch from course_milestones + course_tasks
+  if (project.is_course && project.course_id) {
+    const courseMilestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY position ASC').all(project.course_id);
+    const courseTasks = db.prepare('SELECT * FROM course_tasks WHERE course_id = ? ORDER BY position ASC').all(project.course_id);
+    const progressList = db.prepare('SELECT * FROM course_progress WHERE project_id = ?').all(project.id);
+    
+    // Format milestones like V1 format
+    const milestones = courseMilestones.map((cm, i) => {
+      const mTasks = courseTasks.filter(t => t.milestone_id === cm.id);
+      const mProgress = mTasks.map(t => progressList.find(p => p.task_id === t.id));
+      const allDone = mTasks.length > 0 && mTasks.every(t => {
+        const prog = progressList.find(p => p.task_id === t.id);
+        return prog && prog.status === 'completed';
+      });
+      const anyStarted = mTasks.some(t => {
+        const prog = progressList.find(p => p.task_id === t.id);
+        return prog && ['in_progress', 'completed'].includes(prog.status);
+      });
+      
+      return {
+        id: cm.id,
+        project_id: project.id,
+        ord: cm.position || (i + 1),
+        title: cm.title,
+        description: cm.description || '',
+        duration_days: cm.duration_days || 7,
+        measurable_output: '',
+        status: allDone ? 'completed' : (i === 0 || anyStarted) ? 'in_progress' : 'locked'
+      };
+    });
+
+    // Format tasks like V1 format + find current task
+    let currentTask = null;
+    const formattedTasks = courseTasks.map(ct => {
+      const prog = progressList.find(p => p.task_id === ct.id);
+      const status = prog?.status || 'pending';
+      
+      const t = {
+        id: ct.id,
+        milestone_id: ct.milestone_id,
+        ord: ct.position || 1,
+        day: 1,
+        title: ct.title,
+        description: ct.description || ct.goal || '',
+        estimated_hours: (ct.estimated_minutes || 30) / 60,
+        commands: JSON.parse(ct.commands || '[]'),
+        folder_structure: JSON.parse(ct.folder_structure || '{}'),
+        starter_template: ct.starter_template || '',
+        concepts_taught: JSON.parse(ct.concepts || '[]'),
+        status: status === 'completed' ? 'passed' : status,
+        attempts: prog?.attempts || 0
+      };
+
+      // First non-completed task = current task
+      if (!currentTask && status !== 'completed') {
+        currentTask = t;
+      }
+      return t;
+    });
+
+    // Compute progress
+    const totalTasks = formattedTasks.length;
+    const completedTasks = formattedTasks.filter(t => t.status === 'passed').length;
+    const progressPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 1000) / 10 : 0;
+
+    // Enrich project with progress
+    project.total_tasks = totalTasks;
+    project.completed_tasks = completedTasks;
+    project.progress_pct = progressPct;
+    project.title = project.title || project.raw_goal;
+
+    return res.json({
+      action: 'task_guidance',
+      message: `Resuming '${project.title}' — ${progressPct}% (${completedTasks}/${totalTasks} tasks)\nCurrent: ${currentTask?.title || 'All done'}`,
+      project,
+      task: currentTask,
+      milestones,
+      conversation: tracker.getConversation(project.id, req.user.id, 100),
+    });
+  }
+
+  // V1 LEGACY PROJECT
   res.json({
     action: 'task_guidance',
     message: `Resuming '${project.title}' — ${project.progress_pct}% (${project.completed_tasks}/${project.total_tasks} tasks)\nCurrent: ${milestone?.title || 'N/A'} › ${task?.title || 'All done'}`,
@@ -365,6 +448,36 @@ router.get('/projects/:id/milestones', wrap(async (req, res) => {
   const isReqMentor = req.user.role === 'mentor';
   
   if (!isOwner && !isMentorOwner && !isReqMentor) return res.status(403).json({ error: 'Access denied' });
+
+  if (p.is_course && p.course_id) {
+    const courseMilestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY position ASC').all(p.course_id);
+    const courseTasks = db.prepare('SELECT * FROM course_tasks WHERE course_id = ? ORDER BY position ASC').all(p.course_id);
+    const progressList = db.prepare('SELECT * FROM course_progress WHERE project_id = ?').all(p.id);
+    
+    const milestones = courseMilestones.map((cm, i) => {
+      const mTasks = courseTasks.filter(t => t.milestone_id === cm.id);
+      const allDone = mTasks.length > 0 && mTasks.every(t => {
+        const prog = progressList.find(p => p.task_id === t.id);
+        return prog && prog.status === 'completed';
+      });
+      const anyStarted = mTasks.some(t => {
+        const prog = progressList.find(p => p.task_id === t.id);
+        return prog && ['in_progress', 'completed'].includes(prog.status);
+      });
+      
+      return {
+        id: cm.id,
+        project_id: p.id,
+        ord: cm.position || (i + 1),
+        title: cm.title,
+        description: cm.description || '',
+        duration_days: cm.duration_days || 7,
+        status: allDone ? 'completed' : (i === 0 || anyStarted) ? 'in_progress' : 'locked'
+      };
+    });
+    return res.json(milestones);
+  }
+
   res.json(tracker.getProjectMilestones(req.params.id));
 }));
 
@@ -392,69 +505,111 @@ router.get('/projects/:id/automations', wrap(async (req, res) => {
 // TASKS
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/milestones/:id/tasks', wrap(async (req, res) => {
+  // Check if this is a V2 Course Milestone
+  const cm = db.prepare('SELECT * FROM course_milestones WHERE id = ?').get(req.params.id);
+  if (cm) {
+    const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+    const projectId = userRow?.active_project_id;
+    const courseTasks = db.prepare('SELECT * FROM course_tasks WHERE milestone_id = ? ORDER BY position ASC').all(req.params.id);
+    const progressList = projectId ? db.prepare('SELECT * FROM course_progress WHERE project_id = ?').all(projectId) : [];
+
+    const tasks = courseTasks.map(ct => {
+      const prog = progressList.find(p => p.task_id === ct.id);
+      return {
+        id: ct.id,
+        milestone_id: ct.milestone_id,
+        ord: ct.position || 1,
+        title: ct.title,
+        description: ct.description || ct.goal || '',
+        estimated_hours: (ct.estimated_minutes || 30) / 60,
+        concepts_taught: JSON.parse(ct.concepts || '[]'),
+        status: prog?.status === 'completed' ? 'passed' : (prog?.status || 'pending'),
+        attempts: prog?.attempts || 0
+      };
+    });
+    return res.json(tasks);
+  }
+  
   res.json(tracker.getMilestoneTasks(req.params.id));
 }));
 
 router.get('/tasks/:id', wrap(async (req, res) => {
+  const ct = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(req.params.id);
+  if (ct) {
+    const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+    const projectId = userRow?.active_project_id;
+    const prog = projectId ? db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND task_id = ?').get(projectId, ct.id) : null;
+    
+    return res.json({
+      id: ct.id,
+      milestone_id: ct.milestone_id,
+      ord: ct.position || 1,
+      title: ct.title,
+      description: ct.description || ct.goal || '',
+      estimated_hours: (ct.estimated_minutes || 30) / 60,
+      commands: JSON.parse(ct.commands || '[]'),
+      folder_structure: JSON.parse(ct.folder_structure || '{}'),
+      starter_template: ct.starter_template || '',
+      concepts_taught: JSON.parse(ct.concepts || '[]'),
+      status: prog?.status === 'completed' ? 'passed' : (prog?.status || 'pending'),
+      attempts: prog?.attempts || 0
+    });
+  }
+
   const t = tracker.getTask(req.params.id);
   if (!t) return res.status(404).json({ error: 'Task not found' });
   res.json(t);
 }));
 
 router.post('/tasks/:id/start', wrap(async (req, res) => {
-  // V2 Course Tasks Hook (SQLite Integers)
-  if (!isNaN(req.params.id)) {
-      const db = require('../db/database');
-      const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(req.params.id);
-      
-      if (courseTask) {
+  const taskId = req.params.id;
+  const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(taskId);
+  
+  if (courseTask) {
+      // Prioritize req.body.projectId (from dashboard), fallback to active_project_id (last active)
+      let projectId = req.body.projectId;
+      if (!projectId) {
           const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
-          const projectId = userRow?.active_project_id;
-          
-          if (!projectId) return res.status(403).json({ error: 'No active course project found for user' });
-
-          const prog = db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND task_id = ?').get(projectId, courseTask.id);
-          
-          if (prog && !['pending', 'failed'].includes(prog.status)) {
-              return res.status(400).json({ error: `Cannot start task with status: ${prog.status}` });
-          }
-
-          if (prog) {
-              db.prepare('UPDATE course_progress SET status = ?, started_at = datetime("now"), updated_at = datetime("now") WHERE id = ?').run('in_progress', prog.id);
-          } else {
-              db.prepare(`
-                  INSERT INTO course_progress (id, project_id, task_id, status, attempts, started_at, updated_at)
-                  VALUES (?, ?, ?, ?, ?, datetime("now"), datetime("now"))
-              `).run(require('crypto').randomUUID(), projectId, courseTask.id, 'in_progress', 1);
-          }
-
-          let parsedCommands = [];
-          try { parsedCommands = JSON.parse(courseTask.commands || "[]"); } catch(e) {}
-          let parsedConcepts = [];
-          try { parsedConcepts = JSON.parse(courseTask.concepts_taught || "[]"); } catch(e) {}
-          let parsedFolder = {};
-          try { parsedFolder = JSON.parse(courseTask.folder_structure || "{}"); } catch(e) {}
-
-          const updatedTask = {
-              ...courseTask,
-              commands: parsedCommands,
-              concepts_taught: parsedConcepts,
-              folder_structure: parsedFolder,
-              status: 'in_progress',
-              attempts: prog ? prog.attempts : 1
-          };
-          
-          const cmds = parsedCommands.map(c => `  $ ${c}`).join('\n');
-          return res.json({ 
-              action: 'task_guidance', 
-              message: `Task started: ${updatedTask.title}\nEst: ${updatedTask.estimated_hours}h\n\nRun:\n${cmds}`, 
-              task: updatedTask 
-          });
+          projectId = userRow?.active_project_id;
       }
+      
+      if (!projectId) return res.status(400).json({ error: 'Missing projectId' });
+
+      const prog = db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND task_id = ?').get(projectId, courseTask.id);
+      
+      if (prog && !['pending', 'failed'].includes(prog.status)) {
+          return res.status(400).json({ error: `Cannot start task with status: ${prog.status}` });
+      }
+
+      if (prog) {
+          db.prepare("UPDATE course_progress SET status = ?, started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run('in_progress', prog.id);
+      } else {
+          db.prepare(`
+              INSERT INTO course_progress (id, project_id, task_id, status, attempts, started_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `).run(crypto.randomUUID(), projectId, courseTask.id, 'in_progress', 1);
+      }
+
+      const updatedTask = {
+          ...courseTask,
+          commands: JSON.parse(courseTask.commands || '[]'),
+          concepts_taught: JSON.parse(courseTask.concepts || '[]'),
+          folder_structure: JSON.parse(courseTask.folder_structure || '{}'),
+          status: 'in_progress',
+          attempts: prog ? prog.attempts : 1,
+          estimated_hours: (courseTask.estimated_minutes || 30) / 60
+      };
+      
+      const cmds = updatedTask.commands.map(c => `  $ ${c}`).join('\n');
+      return res.json({ 
+          action: 'task_guidance', 
+          message: `Task started: ${updatedTask.title}\nEst: ${updatedTask.estimated_hours}h\n\nRun:\n${cmds}`, 
+          task: updatedTask 
+      });
   }
 
   // V1 Legacy Fallback
-  const task = tracker.getTask(req.params.id);
+  const task = tracker.getTask(taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   if (!['pending','failed','submitted'].includes(task.status)) return res.status(400).json({ error: `Cannot start task with status: ${task.status}` });
   const updated = tracker.startTask(task.id);
@@ -463,7 +618,15 @@ router.post('/tasks/:id/start', wrap(async (req, res) => {
 }));
 
 router.post('/tasks/:id/hint', wrap(async (req, res) => {
-  const task = tracker.getTask(req.params.id);
+  const taskId = req.params.id;
+  const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(taskId);
+  
+  if (courseTask) {
+    const result = await learningController.processSubmission(req.user.id, taskId, { type: 'hint' });
+    return res.json({ action: 'task_guidance', message: result.scaffold, task: courseTask });
+  }
+
+  const task = tracker.getTask(taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   const hint = await guidedExecution.getHint(task, task.attempts || 1);
   const ms = tracker.getMilestone(task.milestone_id);
@@ -473,8 +636,27 @@ router.post('/tasks/:id/hint', wrap(async (req, res) => {
 
 router.post('/tasks/:id/ask', wrap(async (req, res) => {
   const { question, activeFileContent, activeFilePath, image } = req.body;
+  const taskId = req.params.id;
   if (!question && !image) return res.status(400).json({ error: 'question or image required' });
-  const task = tracker.getTask(req.params.id);
+
+  const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(taskId);
+  if (courseTask) {
+    const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+    const projectId = userRow?.active_project_id;
+    if (!projectId) return res.status(403).json({ error: 'No active project' });
+
+    const p = tracker.getProject(projectId);
+    const milestones = tracker.getProjectMilestones(p.id); // Or course milestones?
+    const history = tracker.getTaskConversation(taskId, 10).map(t => ({ role: t.role, content: t.content }));
+    const treeNodes = []; // Could populate via WorkspaceService
+    
+    const guidance = await guidedExecution.getGuidance(courseTask, question || 'Help me with this task.', history, activeFileContent, activeFilePath, p, milestones, treeNodes, image);
+    tracker.logTurn(p.id, 'user', question, 'task_guidance', taskId);
+    tracker.logTurn(p.id, 'mentor', guidance, 'task_guidance', taskId);
+    return res.json({ action: 'task_guidance', message: guidance, task: courseTask });
+  }
+
+  const task = tracker.getTask(taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   
   const ms = tracker.getMilestone(task.milestone_id);
@@ -905,12 +1087,206 @@ router.post('/mentor/leave', wrap(async (req, res) => {
     res.json({ success: true, message: 'Session unlocked. Dropping to guided mode. Explanation enforced.' });
 }));
 
+// ================= COURSE BUILDER (MENTOR) =================
+
+const mentorOnly = (req, res, next) => {
+  const role = req.user?.role || db.prepare('SELECT role FROM users WHERE id = ?').get(req.user?.id)?.role;
+  if (role !== 'mentor') return res.status(403).json({ error: 'Mentor access required.' });
+  next();
+};
+
+// POST /builder/course — create a new course draft
+router.post('/builder/course', mentorOnly, wrap(async (req, res) => {
+  const { title, description, tech_stack, difficulty, estimated_hours, learning_outcome } = req.body;
+  if (!title || title.length < 3) return res.status(400).json({ error: 'Title must be at least 3 characters.' });
+  if (!description || description.length < 20) return res.status(400).json({ error: 'Description must be at least 20 characters.' });
+
+  const id = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO courses (id, title, description, tech_stack, difficulty, estimated_hours, learning_outcome, creator_id, status, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 0)
+  `).run(id, title, description, JSON.stringify(tech_stack || []), difficulty || 'beginner', estimated_hours || 10, learning_outcome || '', req.user.id);
+
+  res.json({ success: true, course_id: id });
+}));
+
+// PUT /builder/course/:id — update course metadata
+router.put('/builder/course/:id', mentorOnly, wrap(async (req, res) => {
+  const course = db.prepare('SELECT * FROM courses WHERE id = ? AND creator_id = ?').get(req.params.id, req.user.id);
+  if (!course) return res.status(404).json({ error: 'Course not found or not yours.' });
+  if (course.status === 'published') return res.status(400).json({ error: 'Cannot edit a published course. Create a new version.' });
+
+  const { title, description, tech_stack, difficulty, estimated_hours, learning_outcome } = req.body;
+  db.prepare(`
+    UPDATE courses SET title = ?, description = ?, tech_stack = ?, difficulty = ?, estimated_hours = ?, learning_outcome = ?
+    WHERE id = ?
+  `).run(title || course.title, description || course.description, JSON.stringify(tech_stack || JSON.parse(course.tech_stack || '[]')),
+    difficulty || course.difficulty, estimated_hours || course.estimated_hours, learning_outcome || course.learning_outcome, course.id);
+
+  res.json({ success: true });
+}));
+
+// GET /builder/course/:id — get full course structure (for editing)
+router.get('/builder/course/:id', mentorOnly, wrap(async (req, res) => {
+  const course = db.prepare('SELECT * FROM courses WHERE id = ? AND creator_id = ?').get(req.params.id, req.user.id);
+  if (!course) return res.status(404).json({ error: 'Course not found or not yours.' });
+
+  const milestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY position ASC').all(course.id);
+  const tasks = db.prepare('SELECT * FROM course_tasks WHERE course_id = ? ORDER BY position ASC').all(course.id);
+
+  res.json({ course, milestones, tasks });
+}));
+
+// GET /builder/courses — list mentor's courses
+router.get('/builder/courses', mentorOnly, wrap(async (req, res) => {
+  const courses = db.prepare('SELECT * FROM courses WHERE creator_id = ? ORDER BY created_at DESC').all(req.user.id);
+  res.json(courses);
+}));
+
+// POST /builder/course/:id/milestone — add milestone
+router.post('/builder/course/:id/milestone', mentorOnly, wrap(async (req, res) => {
+  const course = db.prepare('SELECT * FROM courses WHERE id = ? AND creator_id = ?').get(req.params.id, req.user.id);
+  if (!course) return res.status(404).json({ error: 'Course not found.' });
+
+  const { title, description, duration_days } = req.body;
+  if (!title || title.length < 2) return res.status(400).json({ error: 'Milestone title required.' });
+
+  const maxPos = db.prepare('SELECT MAX(position) as mx FROM course_milestones WHERE course_id = ?').get(course.id);
+  const position = (maxPos?.mx || 0) + 1;
+
+  const id = crypto.randomUUID();
+  db.prepare('INSERT INTO course_milestones (id, course_id, title, description, duration_days, position) VALUES (?, ?, ?, ?, ?, ?)').run(
+    id, course.id, title, description || '', duration_days || 7, position
+  );
+  res.json({ success: true, milestone_id: id, position });
+}));
+
+// PUT /builder/milestone/:id — update milestone
+router.put('/builder/milestone/:id', mentorOnly, wrap(async (req, res) => {
+  const ms = db.prepare('SELECT cm.*, c.creator_id FROM course_milestones cm JOIN courses c ON cm.course_id = c.id WHERE cm.id = ?').get(req.params.id);
+  if (!ms || ms.creator_id !== req.user.id) return res.status(404).json({ error: 'Not found.' });
+
+  const { title, description, duration_days } = req.body;
+  db.prepare('UPDATE course_milestones SET title = ?, description = ?, duration_days = ? WHERE id = ?').run(
+    title || ms.title, description || ms.description, duration_days || ms.duration_days, ms.id
+  );
+  res.json({ success: true });
+}));
+
+// DELETE /builder/milestone/:id
+router.delete('/builder/milestone/:id', mentorOnly, wrap(async (req, res) => {
+  const ms = db.prepare('SELECT cm.*, c.creator_id FROM course_milestones cm JOIN courses c ON cm.course_id = c.id WHERE cm.id = ?').get(req.params.id);
+  if (!ms || ms.creator_id !== req.user.id) return res.status(404).json({ error: 'Not found.' });
+
+  db.prepare('DELETE FROM course_tasks WHERE milestone_id = ?').run(ms.id);
+  db.prepare('DELETE FROM course_milestones WHERE id = ?').run(ms.id);
+  res.json({ success: true });
+}));
+
+// POST /builder/milestone/:id/task — add task (STRICT SCHEMA)
+router.post('/builder/milestone/:id/task', mentorOnly, wrap(async (req, res) => {
+  const ms = db.prepare('SELECT cm.*, c.creator_id, c.id as cid FROM course_milestones cm JOIN courses c ON cm.course_id = c.id WHERE cm.id = ?').get(req.params.id);
+  if (!ms || ms.creator_id !== req.user.id) return res.status(404).json({ error: 'Not found.' });
+
+  const { title, goal, description, concepts, steps, starter_template, validation_type, validation_rules, hints, difficulty, file_path, commands, folder_structure, estimated_minutes } = req.body;
+
+  // SCHEMA ENFORCEMENT
+  if (!title || title.length < 3) return res.status(400).json({ error: 'Task title required (3+ chars).' });
+  if (!goal || goal.length < 5) return res.status(400).json({ error: 'Task goal required (5+ chars).' });
+  if (!steps || !Array.isArray(steps) || steps.length === 0) return res.status(400).json({ error: 'At least 1 step required.' });
+  if (!validation_type || !['static', 'regex', 'custom', 'file_exists', 'contains'].includes(validation_type)) {
+    return res.status(400).json({ error: 'validation_type required: static | regex | custom | file_exists | contains' });
+  }
+
+  const maxPos = db.prepare('SELECT MAX(position) as mx FROM course_tasks WHERE milestone_id = ?').get(ms.id);
+  const position = (maxPos?.mx || 0) + 1;
+
+  const id = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO course_tasks (id, course_id, milestone_id, title, goal, description, concepts, steps, starter_template, validation_type, validation_rules, hints, difficulty, file_path, commands, folder_structure, estimated_minutes, position)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, ms.cid, ms.id, title, goal, description || '',
+    JSON.stringify(concepts || []),
+    JSON.stringify(steps),
+    starter_template || '',
+    validation_type,
+    JSON.stringify(validation_rules || {}),
+    JSON.stringify(hints || []),
+    difficulty || 'easy',
+    file_path || '',
+    JSON.stringify(commands || []),
+    JSON.stringify(folder_structure || {}),
+    estimated_minutes || 30,
+    position
+  );
+  res.json({ success: true, task_id: id, position });
+}));
+
+// PUT /builder/task/:id — update task
+router.put('/builder/task/:id', mentorOnly, wrap(async (req, res) => {
+  const t = db.prepare('SELECT ct.*, c.creator_id FROM course_tasks ct JOIN courses c ON ct.course_id = c.id WHERE ct.id = ?').get(req.params.id);
+  if (!t || t.creator_id !== req.user.id) return res.status(404).json({ error: 'Not found.' });
+
+  const { title, goal, description, concepts, steps, starter_template, validation_type, validation_rules, hints, difficulty, file_path, commands, folder_structure, estimated_minutes } = req.body;
+  db.prepare(`
+    UPDATE course_tasks SET title = ?, goal = ?, description = ?, concepts = ?, steps = ?, starter_template = ?,
+    validation_type = ?, validation_rules = ?, hints = ?, difficulty = ?, file_path = ?, commands = ?,
+    folder_structure = ?, estimated_minutes = ? WHERE id = ?
+  `).run(
+    title || t.title, goal || t.goal, description || t.description,
+    JSON.stringify(concepts || JSON.parse(t.concepts || '[]')),
+    JSON.stringify(steps || JSON.parse(t.steps || '[]')),
+    starter_template !== undefined ? starter_template : t.starter_template,
+    validation_type || t.validation_type,
+    JSON.stringify(validation_rules || JSON.parse(t.validation_rules || '{}')),
+    JSON.stringify(hints || JSON.parse(t.hints || '[]')),
+    difficulty || t.difficulty,
+    file_path !== undefined ? file_path : t.file_path,
+    JSON.stringify(commands || JSON.parse(t.commands || '[]')),
+    JSON.stringify(folder_structure || JSON.parse(t.folder_structure || '{}')),
+    estimated_minutes || t.estimated_minutes,
+    t.id
+  );
+  res.json({ success: true });
+}));
+
+// DELETE /builder/task/:id
+router.delete('/builder/task/:id', mentorOnly, wrap(async (req, res) => {
+  const t = db.prepare('SELECT ct.*, c.creator_id FROM course_tasks ct JOIN courses c ON ct.course_id = c.id WHERE ct.id = ?').get(req.params.id);
+  if (!t || t.creator_id !== req.user.id) return res.status(404).json({ error: 'Not found.' });
+
+  db.prepare('DELETE FROM course_tasks WHERE id = ?').run(t.id);
+  res.json({ success: true });
+}));
+
+// POST /builder/course/:id/publish — publish to marketplace
+router.post('/builder/course/:id/publish', mentorOnly, wrap(async (req, res) => {
+  const course = db.prepare('SELECT * FROM courses WHERE id = ? AND creator_id = ?').get(req.params.id, req.user.id);
+  if (!course) return res.status(404).json({ error: 'Course not found.' });
+
+  // VALIDATION: Must have milestones + tasks
+  const milestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ?').all(course.id);
+  if (milestones.length === 0) return res.status(400).json({ error: 'Add at least 1 milestone before publishing.' });
+
+  const tasks = db.prepare('SELECT * FROM course_tasks WHERE course_id = ?').all(course.id);
+  if (tasks.length === 0) return res.status(400).json({ error: 'Add at least 1 task before publishing.' });
+
+  // Check every task has validation
+  const invalidTasks = tasks.filter(t => !t.validation_type);
+  if (invalidTasks.length > 0) return res.status(400).json({ error: `${invalidTasks.length} task(s) missing validation rules. All tasks must have validation.` });
+
+  db.prepare('UPDATE courses SET status = ?, is_active = 1 WHERE id = ?').run('published', course.id);
+  res.json({ success: true, message: 'Course published to marketplace!' });
+}));
+
 router.post('/debug/log', (req, res) => {
   console.log('[BROWSER-LOG]', JSON.stringify(req.body, null, 2));
   res.json({ ok: true });
 });
 
 module.exports = router;
+
 
 
 

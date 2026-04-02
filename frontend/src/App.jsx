@@ -15,11 +15,12 @@ import ProjectsPage from './pages/ProjectsPage';
 import MentorPage from './pages/MentorPage';
 import MarketplacePage from './pages/MarketplacePage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+import CourseBuilderPage from './pages/CourseBuilderPage';
 
 function Header() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { project, userName, token, avatar, logout } = useStore();
+  const { project, userName, token, avatar, logout, role } = useStore();
   const onDash = location.pathname === '/dashboard';
   const onLogin = location.pathname === '/login';
 
@@ -43,6 +44,7 @@ function Header() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
           <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Dashboard</button>
           <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
+          {role === 'mentor' && <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>}
         </div>
       )}
 
@@ -159,7 +161,9 @@ function AppInner() {
         <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />
-        <Route path="/mentor" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/mentor" element={<ProtectedRoute><MentorPage /></ProtectedRoute>} />
+        <Route path="/builder" element={<ProtectedRoute><CourseBuilderPage /></ProtectedRoute>} />
+        <Route path="/builder/:id" element={<ProtectedRoute><CourseBuilderPage /></ProtectedRoute>} />
         <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
         <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
         <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />

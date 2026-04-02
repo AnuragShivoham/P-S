@@ -52,12 +52,15 @@ class WorkspaceService {
    * Validate file path is within project
    */
   static validateFilePath(projectId, filePath) {
-    if (path.isAbsolute(filePath)) {
+    // Normalize: Strip leading slashes/backslashes to prevent accidental "Absolute Path" security violations
+    const normalizedPath = (filePath || '').replace(/^[\/\\]+/, '');
+    
+    if (path.isAbsolute(normalizedPath)) {
       throw new Error('Security Violation: Absolute paths are strictly forbidden.');
     }
 
     const projectPath = this.getProjectPath(projectId);
-    const fullPath = path.resolve(path.join(projectPath, filePath));
+    const fullPath = path.resolve(path.join(projectPath, normalizedPath));
     
     if (!fullPath.startsWith(projectPath)) {
       throw new Error('Security Violation: Path traversal attempt detected.');

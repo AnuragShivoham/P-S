@@ -10,7 +10,7 @@ module.exports = {
   GROQ_API_KEY,
   GROQ_MODEL: 'llama-3.3-70b-versatile',
   DB_PATH: process.env.DB_PATH || './data/amitbodhit.db',
-  MAX_CLARIFY_ROUNDS: 3,
+  MAX_CLARIFY_ROUNDS: 5,
   QA_PASS_SCORE: 0.70,
   JWT_SECRET: process.env.JWT_SECRET || 'amit-bodhit-secret-change-in-prod',
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',

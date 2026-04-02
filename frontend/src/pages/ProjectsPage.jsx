@@ -82,8 +82,8 @@ export default function ProjectsPage() {
               Courses
             </button>
           </div>
-          <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/courses')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Plus size={16} /> {filter === 'ai' ? 'New Project' : 'Browse Courses'}
+          <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/marketplace')} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={16} /> {filter === 'ai' ? 'New Project' : 'Browse Marketplace'}
           </button>
         </div>
 
@@ -97,7 +97,7 @@ export default function ProjectsPage() {
               <FolderGit2 size={24} color="var(--tx-d)" />
             </div>
             <div style={{ color: 'var(--tx-2)', fontSize: 13 }}>You don't have any {filter === 'ai' ? 'AI projects' : 'courses'} yet.</div>
-            <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/courses')}>
+            <button className="btn btn-p" onClick={() => navigate(filter === 'ai' ? '/goal' : '/marketplace')}>
               {filter === 'ai' ? 'Create Your First Project' : 'Enroll in a Course'}
             </button>
           </div>

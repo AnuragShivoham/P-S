@@ -32,10 +32,10 @@ function getCourseFullStructure(courseId, version = 1) {
 // SECURE VALIDATION ENGINE (Sandboxed Pathing & Strict Regex)
 // -------------------------------------------------------------
 function validateStaticTask(task, workspacePath) {
-  const expectedOutput = task.expected_output;
+  // Map V2 course_tasks fields to V1 logic
+  const expectedOutput = task.file_path || task.expected_output;
   if (!expectedOutput) return { passed: true };
 
-  // Rule 2 Fix: Secure Path Traversal Bounds
   const safePath = path.resolve(workspacePath, expectedOutput);
   if (!safePath.startsWith(workspacePath)) {
     throw new Error("SECURITY FAULT: Invalid path traversal detected.");
@@ -44,15 +44,14 @@ function validateStaticTask(task, workspacePath) {
   // Parse hints securely
   let parsedHints = [];
   try { 
-    parsedHints = JSON.parse(task.hints || "[]");
+    parsedHints = typeof task.hints === 'string' ? JSON.parse(task.hints || "[]") : (task.hints || []);
   } catch(e) { 
     parsedHints = [task.hints]; 
   }
   
-  // Rule 4 Fix: Sanitize Hint Output (Block XSS HTML tags)
   const getHint = () => {
     const raw = parsedHints[0] || "Review your syntax.";
-    return raw.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return (typeof raw === 'string' ? raw : JSON.stringify(raw)).replace(/</g, "&lt;").replace(/>/g, "&gt;");
   };
 
   if (task.validation_type === 'file_exists') {
@@ -60,24 +59,34 @@ function validateStaticTask(task, workspacePath) {
     return { passed: false, hint: `File missing: Make sure you created '${expectedOutput}'.` };
   }
 
-  if (task.validation_type === 'string_match') {
+  if (task.validation_type === 'string_match' || task.validation_type === 'regex' || task.validation_type === 'contains') {
     if (!fs.existsSync(safePath)) {
       return { passed: false, hint: `File missing: ${expectedOutput}` };
     }
     
     let content = fs.readFileSync(safePath, 'utf8');
+    content = content.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, ''); // Strip comments
     
-    // Rule 3 Fix: Strip Comments to block naive "// express()" bypasses
-    content = content.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
-    
-    const pattern = task.validation_pattern;
+    // Extract pattern from task.validation_pattern (V1) or task.validation_rules (V2)
+    let pattern = task.validation_pattern;
+    if (!pattern && task.validation_rules) {
+      try {
+        const rules = typeof task.validation_rules === 'string' ? JSON.parse(task.validation_rules) : task.validation_rules;
+        pattern = rules.regex || rules.pattern || rules.contains;
+      } catch(e) {}
+    }
+
     if (!pattern) return { passed: true };
 
-    try {
-      const regex = new RegExp(pattern, 'i'); // Case insensitive evaluation
-      if (regex.test(content)) return { passed: true };
-    } catch(e) {
-      console.error("[CourseValidator] Invalid RegExp Pattern Execution Segment:", pattern);
+    if (task.validation_type === 'contains' && !pattern.includes('/') && !pattern.includes('\\')) {
+      if (content.toLowerCase().includes(pattern.toLowerCase())) return { passed: true };
+    } else {
+      try {
+        const regex = new RegExp(pattern, 'i');
+        if (regex.test(content)) return { passed: true };
+      } catch(e) {
+        console.error("[CourseValidator] Invalid RegExp Pattern:", pattern);
+      }
     }
     
     return { passed: false, hint: getHint() };

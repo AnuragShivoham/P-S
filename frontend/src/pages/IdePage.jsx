@@ -778,7 +778,18 @@ export default function IDE() {
             {/* MENU BAR */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: '#010409', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
                 <button title="← Dashboard" onClick={() => navigate('/')} style={{ ...iconBtn, marginRight: 6 }}><ArrowLeft size={14} /></button>
-                <span style={{ fontWeight: 800, fontSize: 12, color: '#58a6ff', marginRight: 8 }}>AMIT-BODHIT IDE</span>
+                <span style={{ fontWeight: 800, fontSize: 13, color: 'white', marginRight: 12 }}>
+                    {project?.title || project?.raw_goal || 'AMIT-BODHIT IDE'}
+                </span>
+                <span style={{ 
+                    fontSize: 10, fontWeight: 900, padding: '1px 5px', borderRadius: 3, 
+                    background: project?.is_course ? 'rgba(56, 139, 253, 0.15)' : 'rgba(163, 113, 247, 0.15)',
+                    color: project?.is_course ? '#58a6ff' : '#a371f7',
+                    border: '1px solid currentColor',
+                    marginRight: 16
+                }}>
+                    {project?.is_course ? 'MARKETPLACE' : 'PERSONAL'}
+                </span>
                 <button title="New File (right-click explorer)" onClick={() => openModal('newFile', { path: '', isDir: true }, 'filename.js')} style={iconBtn}><FilePlus size={14} /></button>
                 <button title="New Folder" onClick={() => openModal('newFolder', { path: '', isDir: true }, 'folder-name')} style={iconBtn}><FolderPlus size={14} /></button>
                 <button title="Import File (Top)" onClick={() => { setImportTarget('/'); document.getElementById('hidden-file-input')?.click(); }} style={iconBtn}><FolderOpen size={14} /></button>
