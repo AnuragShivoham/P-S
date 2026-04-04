@@ -45,7 +45,11 @@ export default function LoginPage() {
     try {
       const res = await api.verifyOtp(email, otp, name, role);
       setAuth(res.user, res.token);
-      navigate('/');
+      if (res.user.role === 'mentor') {
+        navigate('/mentor');
+      } else {
+        navigate('/projects');
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -58,7 +62,11 @@ export default function LoginPage() {
     try {
       const res = await api.loginGoogle(response.credential, role);
       setAuth(res.user, res.token);
-      navigate('/');
+      if (res.user.role === 'mentor') {
+        navigate('/mentor');
+      } else {
+        navigate('/projects');
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -188,17 +196,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        <div style={{ marginTop: 40, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--bg-s)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--green)' }}>
-              <GraduationCap size={20} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx)' }}>Enterprise Grade Security</div>
-              <div style={{ fontSize: 10, color: 'var(--tx-m)' }}>OAuth 2.0 and PKCE protected flow</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
