@@ -21,24 +21,41 @@ const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
 });
 
 // ── INTERNAL: activate project + generate plan ────────────────────────────────
-async function activateAndPlan(res, project, extracted) {
-  // Safeguard: Ensure all fields are primitives for SQLite binding
-  const safeExtracted = {
-    title: String(extracted.title || 'Untitled Project'),
-    tech_stack: Array.isArray(extracted.tech_stack) ? extracted.tech_stack : [],
-    scope: String(extracted.scope || ''),
-    deadline_days: Number(extracted.deadline_days) || 30,
-    skill_level: String(extracted.skill_level || 'beginner'),
-    deliverables: Array.isArray(extracted.deliverables) ? extracted.deliverables : []
-  };
+// ── INTERNAL: generate milestones (Step 2) ──────────────────────────────────
+async function generateMilestones(res, project, extracted) {
+  // Save extracted details temporarily or transition to 'planning'
+  // Map NEW schema to OLD DB fields
+  const title = extracted.title || project.raw_goal;
+  const stack = JSON.stringify(extracted.stack || extracted.tech_stack || []);
+  const scope = extracted.scope || "";
+  const days  = extracted.time || extracted.deadline_days || 7;
+  const level = extracted.skill || extracted.skill_level || 'beginner';
+  const feats = JSON.stringify(extracted.features || extracted.deliverables || []);
+
+  db.prepare(`UPDATE projects SET title=?,tech_stack=?,scope=?,deadline_days=?,skill_level=?,deliverables=?,status='planning' WHERE id=?`)
+    .run(title, stack, scope, days, level, feats, project.id);
+
+  const planData = await milestoneGenerator.generateMilestones(extracted);
+  const milestones = planData.milestones || planData;
+  const reasoning = planData.reasoning || 'Milestones generated. Please review and confirm your plan.';
   
-  project = tracker.activateProject(project.id, safeExtracted);
+  res.json({
+    action: 'milestones_generated',
+    message: reasoning,
+    project: tracker.getProject(project.id),
+    milestones
+  });
+}
 
-  // Milestones - Use safeExtracted for AI prompt too
-  const mData = await milestoneGenerator.generateMilestones(safeExtracted);
-  const mObjs = mData.map(m => tracker.createMilestone(project.id, m));
+// ── INTERNAL: finalize activation (Step 3) ──────────────────────────────────
+async function finalizeActivation(res, projectId, confirmedMilestones) {
+  let project = tracker.getProject(projectId);
+  if (!project) throw new Error('Project not found');
 
-  // Unlock milestone 1 + generate tasks
+  // Insert milestones — normalize AI-generated objects (they have no 'order' field)
+  const mObjs = confirmedMilestones.map((m, i) => tracker.createMilestone(project.id, { ...m, order: m.order ?? m.ord ?? (i + 1) }));
+
+  // Activate & setup first task
   const first = mObjs[0];
   tracker.unlockMilestone(first.id);
 
@@ -47,21 +64,23 @@ async function activateAndPlan(res, project, extracted) {
     { order: first.ord, title: first.title, description: first.description, duration_days: first.duration_days, measurable_output: first.measurable_output },
     ctx
   );
-  const tObjs = tData.map(t => tracker.createTask(first.id, t));
+  const tObjs = tData.map((t, i) => tracker.createTask(first.id, { ...t, order: t.order ?? t.ord ?? (i + 1), day: t.day ?? 1 }));
 
   tracker.setCurrentPointers(project.id, first.id, tObjs[0]?.id || null);
+  db.prepare("UPDATE projects SET status='active' WHERE id=?").run(project.id);
   project = tracker.refreshProgress(project.id);
 
-  tracker.logTurn(project.id, 'mentor', `Project '${project.title}' ready. Start: ${first.title}`, 'task_guidance');
+  tracker.logTurn(project.id, 'mentor', `Project initialized. Start with: ${first.title}`, 'task_guidance');
 
-  res.status(201).json({
+  res.json({
     action: 'plan_ready',
-    message: `Project '${project.title}' is ready. ${mObjs.length} milestone(s). Start with: ${first.title}`,
+    message: `Project '${project.title}' is now active!`,
     project,
     milestones: tracker.getProjectMilestones(project.id),
     task: tObjs[0] || null,
   });
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USERS
@@ -86,7 +105,6 @@ router.post('/goals/submit', wrap(async (req, res) => {
   const { raw_goal } = req.body;
   const user_id = req.user.id;
   if (!raw_goal) return res.status(400).json({ error: 'raw_goal required' });
-  if (raw_goal.trim().length < 20) return res.status(400).json({ error: 'Goal too vague — describe what you want to build, what tech, and by when' });
   if (!tracker.getUser(user_id)) return res.status(404).json({ error: 'User not found' });
 
   const result = await goalClarifier.clarifyGoal(raw_goal);
@@ -98,16 +116,35 @@ router.post('/goals/submit', wrap(async (req, res) => {
   const project = tracker.createProject(user_id, raw_goal);
   tracker.logTurn(project.id, 'user', raw_goal, 'clarification');
 
-  if (result.status === 'needs_clarification') {
-    const questions = result.questions.map(q => q.question);
-    tracker.setClarification(project.id, [{ questions: result.questions }], 1);
-    const msg = `Answer these questions:\n${questions.map((q,i) => `${i+1}. ${q}`).join('\n')}`;
-    tracker.logTurn(project.id, 'mentor', msg, 'clarification');
-    return res.status(201).json({ action: 'clarify', message: msg, project: tracker.getProject(project.id), clarification_questions: questions });
+  if (result.status === 'needs_refinement' || result.refinement_options) {
+    return res.status(201).json({ 
+      action: 'refine', 
+      message: "This goal is broad. Select a specific model to proceed:", 
+      project: tracker.getProject(project.id), 
+      options: result.refinement_options || []
+    });
   }
 
-  await activateAndPlan(res, project, result);
+  if (result.status === 'needs_setup' || result.missing) {
+
+    tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
+    return res.status(201).json({ 
+      action: 'setup', 
+      message: result.confirmation_text || "Analyzing project requirements...", 
+      project: tracker.getProject(project.id), 
+      missing: result.missing,
+      extracted: result.extracted
+    });
+  }
+
+  if (result.status === 'clear') {
+    return await generateMilestones(res, project, result.extracted || result);
+  }
+
+  await generateMilestones(res, project, result);
 }));
+
+
 
 router.post('/goals/clarify', wrap(async (req, res) => {
   const { project_id, answers } = req.body;
@@ -131,17 +168,88 @@ router.post('/goals/clarify', wrap(async (req, res) => {
   if (result.status === 'rejected') {
     return res.json({ action: 'rejected', message: `Rejected: ${result.reason}` });
   }
-  if (result.status === 'needs_clarification') {
-    const questions = result.questions.map(q => q.question);
-    history.push({ questions: result.questions });
+  if (result.status === 'needs_setup' || result.missing) {
+    history.push({ missing: result.missing, extracted: result.extracted });
     tracker.setClarification(project_id, history, project.clarification_round + 1);
-    const msg = `Still need clarification:\n${questions.map((q,i) => `${i+1}. ${q}`).join('\n')}`;
-    tracker.logTurn(project_id, 'mentor', msg, 'clarification');
-    return res.json({ action: 'clarify', message: msg, project: tracker.getProject(project_id), clarification_questions: questions });
+    return res.json({ 
+      action: 'setup', 
+      message: result.confirmation_text || "Refining project setup...", 
+      project: tracker.getProject(project_id), 
+      missing: result.missing,
+      extracted: result.extracted
+    });
   }
 
-  await activateAndPlan(res, tracker.getProject(project_id), result);
+  if (result.status === 'clear') {
+    return await generateMilestones(res, project, result.extracted || result);
+  }
+
+  await generateMilestones(res, tracker.getProject(project_id), result);
 }));
+
+
+router.post('/goals/confirm', wrap(async (req, res) => {
+  const { project_id, milestones } = req.body;
+  if (!project_id || !milestones) return res.status(400).json({ error: 'project_id and milestones required' });
+  await finalizeActivation(res, project_id, milestones);
+}));
+
+router.post('/goals/adjust', wrap(async (req, res) => {
+  const { project_id, type, value } = req.body;
+  const project = tracker.getProject(project_id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  
+  const db = require('../db/database');
+  if (type === 'time') {
+    db.prepare(`UPDATE projects SET deadline_days=? WHERE id=?`).run(value, project.id);
+  } else if (type === 'difficulty') {
+    db.prepare(`UPDATE projects SET skill_level=? WHERE id=?`).run(value, project.id);
+  } else if (type === 'add_feature') {
+    let feats = project.deliverables || [];
+    if (!feats.includes(value)) feats.push(value);
+    db.prepare(`UPDATE projects SET deliverables=? WHERE id=?`).run(JSON.stringify(feats), project.id);
+  } else if (type === 'remove_feature') {
+    let feats = project.deliverables || [];
+    feats = feats.filter(f => f !== value);
+    db.prepare(`UPDATE projects SET deliverables=? WHERE id=?`).run(JSON.stringify(feats), project.id);
+  }
+
+  const updatedProject = tracker.getProject(project_id);
+  const extracted = {
+    title: updatedProject.title,
+    stack: updatedProject.tech_stack,
+    scope: updatedProject.scope,
+    time: updatedProject.deadline_days,
+    skill: updatedProject.skill_level,
+    features: updatedProject.deliverables
+  };
+
+  const planData = await milestoneGenerator.generateMilestones(extracted);
+  const milestones = planData.milestones || planData;
+  res.json({ action: 'milestones_generated', message: planData.reasoning || 'Plan adjusted successfully.', project: updatedProject, milestones });
+}));
+
+router.post('/goals/regenerate', wrap(async (req, res) => {
+  const { project_id } = req.body;
+  const project = tracker.getProject(project_id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+
+  const extracted = {
+    title: project.title,
+    stack: project.tech_stack,
+    scope: project.scope,
+    time: project.deadline_days,
+    skill: project.skill_level,
+    features: project.deliverables
+  };
+
+  const planData = await milestoneGenerator.generateMilestones(extracted);
+  const milestones = planData.milestones || planData;
+  res.json({ action: 'milestones_generated', message: planData.reasoning || 'Plan regenerated successfully.', project, milestones });
+}));
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COURSE ENGINE ROUTES (V2)
@@ -285,6 +393,26 @@ router.get('/projects/latest', wrap(async (req, res) => {
   const state = tracker.getResumeState(latestId);
   if (!state || !state.project || state.project.user_id !== userId) return res.json({ project: null });
 
+  const { project } = state;
+  if (project.status === 'planning') {
+    const extracted = {
+        title: project.title,
+        stack: project.tech_stack,
+        scope: project.scope,
+        time: project.deadline_days,
+        skill: project.skill_level,
+        features: project.deliverables
+    };
+    const planData = await milestoneGenerator.generateMilestones(extracted);
+    const milestones = planData.milestones || planData;
+    return res.json({
+        action: 'milestones_generated',
+        message: 'Resuming your project plan...',
+        project,
+        milestones
+    });
+  }
+
   res.json({
     action: 'task_guidance',
     project: state.project,
@@ -331,6 +459,26 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
   }
 
   tracker.setActiveProject(req.user.id, project.id);
+
+  // PLANNING STATE: Regenerate plan if not confirmed
+  if (project.status === 'planning') {
+    const extracted = {
+        title: project.title,
+        stack: project.tech_stack,
+        scope: project.scope,
+        time: project.deadline_days,
+        skill: project.skill_level,
+        features: project.deliverables
+    };
+    const planData = await milestoneGenerator.generateMilestones(extracted);
+    const milestones = planData.milestones || planData;
+    return res.json({
+        action: 'milestones_generated',
+        message: 'Resuming your project plan...',
+        project,
+        milestones
+    });
+  }
 
   // COURSE PROJECT: Fetch from course_milestones + course_tasks
   if (project.is_course && project.course_id) {

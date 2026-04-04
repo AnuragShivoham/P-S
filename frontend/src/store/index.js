@@ -44,13 +44,14 @@ export const useStore = create((set, get) => ({
 
   project:     null,
   milestones:  [],
+  tempMilestones: null,
   currentTask: null,
   qaReview:    null,
   automations: [],
   successMsg:  '',
-  successMsg:  '',
   isRehydrating: !!localStorage.getItem('ab_token'),
   setRehydrating: (r) => set({ isRehydrating: r }),
+
 
   setProject:     p  => {
     if (p?.id) localStorage.setItem('ab_pid', p.id);
@@ -76,12 +77,26 @@ export const useStore = create((set, get) => ({
         u.projectId = res.project.id;
         localStorage.setItem('ab_pid', res.project.id);
     }
-    if (res.milestones) u.milestones = res.milestones;
-    if (res.task || res.next_task) {
-        const t = res.task || res.next_task;
+    if (res.milestones) {
+        if (res.action === 'milestones_generated') {
+          u.tempMilestones = res.milestones;
+        } else {
+          u.milestones = res.milestones;
+          u.tempMilestones = null;
+        }
+    }
+    if (res.task !== undefined || res.next_task !== undefined) {
+        const t = res.task || res.next_task || null;
         u.currentTask = t;
-        u.taskId = t.id;
-        localStorage.setItem('ab_tid', t.id);
+        u.taskId = t ? t.id : null;
+        if (t) localStorage.setItem('ab_tid', t.id);
+        else localStorage.removeItem('ab_tid');
+    } else if (res.action === 'resume' || res.action === 'plan_ready') {
+        if (!res.task) {
+          u.currentTask = null;
+          u.taskId = null;
+          localStorage.removeItem('ab_tid');
+        }
     }
     if (res.qa_review)  u.qaReview   = res.qa_review;
     if (res.automations?.length) u.automations = [...get().automations, ...res.automations];
@@ -90,6 +105,7 @@ export const useStore = create((set, get) => ({
     }
     set(u);
   },
+
   reset: () => {
     localStorage.removeItem('ab_pid');
     localStorage.removeItem('ab_tid');

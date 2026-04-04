@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useStore } from '../store';
 import { StatusBadge, ProgressBar, Spinner, TermBlock, FolderTree, QAPanel, CodeBlock } from '../components/UI';
 import { Paperclip, X, ShieldAlert, Zap } from 'lucide-react';
-import MentorDashboard from '../components/mentor/MentorDashboard';
+
 
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
@@ -48,7 +48,11 @@ function Sidebar({ project, milestones, onNew }) {
             <div>
               <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>STACK</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {(project.tech_stack || []).map(t => <span key={t} className="stag">{t}</span>)}
+                {(() => {
+                  const stack = Array.isArray(project.tech_stack) ? project.tech_stack :
+                    (typeof project.tech_stack === 'string' ? (() => { try { return JSON.parse(project.tech_stack); } catch(e) { return [project.tech_stack]; } })() : []);
+                  return stack.map(t => <span key={t} className="stag">{t}</span>);
+                })()}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
@@ -194,8 +198,12 @@ function TaskPanel({ task, onSubmit, submitting }) {
             <button 
                 className="btn btn-g" 
                 onClick={async () => {
-                    await api.requestHelp(project.id);
-                    alert("SOS sent! A mentor has been pinged and will review your session.");
+                    const { project: p } = useStore.getState();
+                    if (!p?.id) return;
+                    try {
+                      await api.requestHelp(p.id);
+                      alert("SOS sent! A mentor has been pinged and will review your session.");
+                    } catch(e) { alert('Error: ' + e.message); }
                 }} 
                 style={{ background: '#f85149', color: '#fff', border: 'none' }}
             >
@@ -337,10 +345,13 @@ export default function DashboardPage() {
   const [tab, setTab] = useState('task');
   const [submitting, setSubm] = useState(false);
   const [error, setError] = useState('');
+ 
+  useEffect(() => {
+    if (project?.status === 'planning') navigate('/confirm-plan');
+    if (project?.status === 'clarifying') navigate('/setup');
+  }, [project, navigate]);
 
-  if (role === 'mentor' && !project) {
-      return <MentorDashboard />;
-  }
+
 
   const handleSubmit = async (text) => {
     setSubm(true); setError(''); clearQA();

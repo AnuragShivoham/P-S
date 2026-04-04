@@ -11,7 +11,11 @@ import DashboardPage from './pages/DashboardPage';
 import CompletePage from './pages/CompletePage';
 import IdePage from './pages/IdePage';
 import LoginPage from './pages/LoginPage';
+import SetupPage from './pages/SetupPage';
+import PlanConfirmationPage from './pages/PlanConfirmationPage';
+
 import ProjectsPage from './pages/ProjectsPage';
+
 import MentorPage from './pages/MentorPage';
 import MarketplacePage from './pages/MarketplacePage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
@@ -35,16 +39,25 @@ function Header() {
 
   return (
     <header className="hdr">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/projects')}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate(role === 'mentor' ? '/mentor' : '/projects')}>
         <div className="logo">AMIT-BODHIT</div>
         <div className="logo-sub">AI Development Hub</div>
       </div>
       
       {token && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
-          <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Dashboard</button>
-          <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
-          {role === 'mentor' && <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>}
+          <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>
+            {role === 'mentor' ? 'My Progress' : 'Dashboard'}
+          </button>
+          {role === 'student' && (
+            <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
+          )}
+          {role === 'mentor' && (
+            <>
+              <button onClick={() => navigate('/mentor')} style={navBtn('Intervention', '/mentor')}>Intervention</button>
+              <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>
+            </>
+          )}
         </div>
       )}
 
@@ -90,6 +103,21 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function MentorRoute({ children }) {
+  const { token, role } = useStore();
+  const navigate = useNavigate();
+  if (!token) return <Navigate to="/login" replace />;
+  if (role !== 'mentor') return <Navigate to="/projects" replace />;
+  return children;
+}
+
+function HomeRedirect() {
+  const { token, role } = useStore();
+  if (!token) return <Navigate to="/login" replace />;
+  if (role === 'mentor') return <Navigate to="/mentor" replace />;
+  return <Navigate to="/projects" replace />;
+}
+
 function AppInner() {
   const { token, projectId, applyResponse, isRehydrating, setRehydrating } = useStore();
   
@@ -102,12 +130,13 @@ function AppInner() {
     }
 
     const resume = async () => {
-      const diag = { step: 'start', token: !!token, projectId };
+      const pid = useStore.getState().projectId;
+      const diag = { step: 'start', token: !!token, projectId: pid };
       try {
-        if (projectId) {
+        if (pid) {
           diag.step = 'resume_pid';
           try {
-            const res = await api.resumeProject(projectId);
+            const res = await api.resumeProject(pid);
             diag.resId = res.project?.id;
             api.debugLog({ type: 'rehydrate_success_pid', ...diag });
             applyResponse(res);
@@ -138,7 +167,7 @@ function AppInner() {
 
     setRehydrating(true);
     resume();
-  }, [token, projectId, applyResponse, setRehydrating]);
+  }, [token, applyResponse, setRehydrating]);
 
   if (isRehydrating) {
     return (
@@ -155,15 +184,18 @@ function AppInner() {
       <Header />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<Navigate to="/projects" replace />} />
+        <Route path="/" element={<HomeRedirect />} />
         <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
         <Route path="/goal" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
-        <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
+        <Route path="/setup" element={<ProtectedRoute><SetupPage /></ProtectedRoute>} />
+        <Route path="/confirm-plan" element={<ProtectedRoute><PlanConfirmationPage /></ProtectedRoute>} />
+
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+
         <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />
-        <Route path="/mentor" element={<ProtectedRoute><MentorPage /></ProtectedRoute>} />
-        <Route path="/builder" element={<ProtectedRoute><CourseBuilderPage /></ProtectedRoute>} />
-        <Route path="/builder/:id" element={<ProtectedRoute><CourseBuilderPage /></ProtectedRoute>} />
+        <Route path="/mentor" element={<MentorRoute><MentorPage /></MentorRoute>} />
+        <Route path="/builder" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
+        <Route path="/builder/:id" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
         <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
         <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
         <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />

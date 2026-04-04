@@ -52,7 +52,15 @@ export default function ProjectsPage() {
       const res = await api.resumeProject(id);
       applyResponse(res);
       setSuccessMsg(`Resumed project: ${res.project.title}`);
-      navigate('/dashboard');
+      
+      // Determine correct page based on action or status
+      if (res.action === 'milestones_generated' || res.project.status === 'planning') {
+        navigate('/confirm-plan');
+      } else if (res.project.status === 'clarifying') {
+        navigate('/setup');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err.message);
       setResumingId(null);
