@@ -242,11 +242,12 @@ export default function IDE() {
     };
 
     const loadFsTree = useCallback(async () => {
+        if (!project?.id) return;
         try {
-            const res = await api.getFsTree();
+            const res = await api.getFsTree(project.id);
             setFsTree(res.tree || []);
         } catch (e) { status('Failed to load tree: ' + e.message, true); }
-    }, []);
+    }, [project?.id]);
 
     useEffect(() => { loadFsTree(); }, [loadFsTree]);
 
@@ -275,7 +276,7 @@ export default function IDE() {
         if (!(file.path in fileContents)) {
             status('Opening ' + file.name + '...');
             try {
-                const res = await api.getFile(file.path);
+                const res = await api.getFile(file.path, project.id);
                 setFileContents(prev => ({ ...prev, [file.path]: res.content }));
             } catch (e) { 
                 console.error('[IDE] open failed', e);
@@ -358,16 +359,16 @@ export default function IDE() {
     const handleSave = useCallback(async () => {
         const fileToSave = activeFile;
         const content = fileContents[fileToSave?.path];
-        if (!fileToSave || !dirtyFiles.has(fileToSave.path) || content === undefined) return;
+        if (!fileToSave || !dirtyFiles.has(fileToSave.path) || content === undefined || !project?.id) return;
         setIsSaving(true);
         try {
-            await api.saveFile(fileToSave.path, content);
+            await api.saveFile(fileToSave.path, content, project.id);
             setDirtyFiles(prev => { const n = new Set(prev); n.delete(fileToSave.path); return n; });
             status('Saved ' + fileToSave.name);
             syncTelemetry(true);
         } catch (e) { status('Save failed: ' + e.message, true); }
         setIsSaving(false);
-    }, [activeFile, fileContents, dirtyFiles, syncTelemetry]);
+    }, [activeFile, fileContents, dirtyFiles, syncTelemetry, project?.id]);
 
 
     useEffect(() => {
@@ -430,23 +431,23 @@ export default function IDE() {
             if (type === 'newFile') {
                 const newPath = joinPath(node?.path ?? '', val);
                 console.log('[IDE] createFile', newPath);
-                await api.createFile(newPath);
+                await api.createFile(newPath, project.id);
                 status('Created ' + val);
             } else if (type === 'newFolder') {
                 const newPath = joinPath(node?.path ?? '', val);
                 console.log('[IDE] createFolder', newPath);
-                await api.createFolder(newPath);
+                await api.createFolder(newPath, project.id);
                 status('Created folder ' + val);
             } else if (type === 'rename') {
                 const newPath = joinPath(parentOf(node.path), val);
                 console.log('[IDE] rename', node.path, '→', newPath);
-                await api.renameFile(node.path, newPath);
+                await api.renameFile(node.path, newPath, project.id);
                 setOpenFiles(prev => prev.map(f => f.path === node.path ? { ...f, name: val, path: newPath } : f));
                 if (activeFile?.path === node.path) setActiveFile(a => ({ ...a, name: val, path: newPath }));
                 status('Renamed to ' + val);
             } else if (type === 'gitClone') {
                 status('Cloning… this may take a moment');
-                await api.gitClone(val, node?.path || '');
+                await api.gitClone(val, node?.path || '', project.id);
                 status('Cloned successfully');
             }
             await loadFsTree();
@@ -467,7 +468,7 @@ export default function IDE() {
         setDeleteTarget(null);
         try {
             console.log('[IDE] delete', node.path);
-            await api.deleteFile(node.path);
+            await api.deleteFile(node.path, project.id);
             status('Deleted ' + node.name);
             setOpenFiles(prev => prev.filter(f => !f.path.startsWith(node.path)));
             if (activeFile?.path.startsWith(node.path)) setActiveFile(null);
@@ -600,7 +601,7 @@ export default function IDE() {
                         if (!result.includes(',')) throw new Error('Invalid format');
                         const content = result.split(',')[1];
                         const targetPath = joinPath(importTarget, relPath);
-                        await api.uploadFile(targetPath, content, 'base64');
+                        await api.uploadFile(targetPath, content, 'base64', project.id);
                         count++;
                         
                         if (files.length === 1) {
@@ -650,8 +651,8 @@ export default function IDE() {
             }
         } else if (act.type === 'create_file') {
             try {
-                await api.createFile(act.path);
-                if (act.content) await api.saveFile(act.path, act.content);
+                await api.createFile(act.path, project?.id);
+                if (act.content) await api.saveFile(act.path, act.content, project?.id);
                 await loadFsTree();
                 status('Created ' + act.path);
             } catch (e) {
@@ -749,7 +750,7 @@ export default function IDE() {
         setGitPushing(true);
         status('Pushing to Git...');
         try {
-            const r = await api.gitPush(`Task checkpoint: ${project.title}`);
+            const r = await api.gitPush(`Task checkpoint: ${project.title}`, project.id);
             if (r.pushFailed) {
                 status('Committed locally — push failed (check remote)', true);
             } else {

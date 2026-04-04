@@ -8,7 +8,21 @@ async function req(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   console.log(`[API] ${method} ${path}`, body || '');
   const r = await fetch(`${BASE}${path}`, opts);
-  const d = await r.json();
+  
+  let d = {};
+  const contentType = r.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    try {
+      d = await r.json();
+    } catch (e) {
+      console.error('[API] Failed to parse JSON:', e);
+    }
+  } else {
+    // Non-JSON response (e.g., error page)
+    const text = await r.text();
+    if (!r.ok) throw new Error(text || `HTTP ${r.status}`);
+  }
+
   if (!r.ok) {
     if (r.status === 401) {
       localStorage.removeItem('ab_token');
@@ -26,7 +40,11 @@ export const api = {
   getUser: (id) => get(`/users/${id}`),
   submitGoal: (uid, rg) => post('/goals/submit', { user_id: uid, raw_goal: rg }),
   clarifyGoal: (pid, ans) => post('/goals/clarify', { project_id: pid, answers: ans }),
+  confirmProjectPlan: (pid, milestones) => post('/goals/confirm', { project_id: pid, milestones }),
+  adjustPlan: (pid, type, value) => post('/goals/adjust', { project_id: pid, type, value }),
+  regeneratePlan: (pid) => post('/goals/regenerate', { project_id: pid }),
   getProject: (id) => get(`/projects/${id}`),
+
   getLatestProject: () => get('/projects/latest'),
   debugLog: (data) => post('/debug/log', data),
   getUserProjects: (uid) => get(`/users/${uid}/projects`),
@@ -42,16 +60,16 @@ export const api = {
   askQuestion: (id, q, content, path, image) => post(`/tasks/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
   askProjectQuestion: (id, q, content, path, image) => post(`/projects/${id}/ask`, { question: q, activeFileContent: content, activeFilePath: path, image }),
   submitTask: (tid, txt) => post('/tasks/submit', { task_id: tid, submission_text: txt }),
-  getFsTree: () => get('/fs/tree'),
-  getFile: (path) => get(`/fs/file?path=${encodeURIComponent(path)}`),
-  saveFile: (path, contents) => post('/fs/file', { path, content: contents }),
-  uploadFile: (path, content, encoding) => post('/fs/upload', { path, content, encoding }),
-  createFile: (path) => post('/fs/touch', { path }),
-  createFolder: (path) => post('/fs/mkdir', { path }),
-  deleteFile: (path) => req('DELETE', `/fs/file?path=${encodeURIComponent(path)}`),
-  renameFile: (oldPath, newPath) => req('PUT', '/fs/rename', { oldPath, newPath }),
-  gitClone: (url, targetDir) => post('/fs/git-clone', { url, targetDir }),
-  gitPush: (message) => post('/fs/git-push', { message }),
+  getFsTree: (projectId) => get(`/fs/tree?projectId=${projectId}`),
+  getFile: (path, projectId) => get(`/fs/file?path=${encodeURIComponent(path)}&projectId=${projectId}`),
+  saveFile: (path, contents, projectId) => post('/fs/file', { path, content: contents, projectId }),
+  uploadFile: (path, content, encoding, projectId) => post('/fs/upload', { path, content, encoding, projectId }),
+  createFile: (path, projectId) => post('/fs/touch', { path, projectId }),
+  createFolder: (path, projectId) => post('/fs/mkdir', { path, projectId }),
+  deleteFile: (path, projectId) => req('DELETE', `/fs/file?path=${encodeURIComponent(path)}&projectId=${projectId}`),
+  renameFile: (oldPath, newPath, projectId) => req('PUT', '/fs/rename', { oldPath, newPath, projectId }),
+  gitClone: (url, targetDir, projectId) => post('/fs/git-clone', { url, targetDir, projectId }),
+  gitPush: (message, projectId) => post('/fs/git-push', { message, projectId }),
   authorizeDeletion: (projectId, path) => post('/fs/authorize-deletion', { projectId, path }),
 
   // Phase 9: Mentor + Marketplace

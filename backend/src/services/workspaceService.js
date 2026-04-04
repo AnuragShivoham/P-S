@@ -83,20 +83,26 @@ class WorkspaceService {
     const walk = (currentPath, relativePath) => {
       try {
         const entries = fs.readdirSync(currentPath, { withFileTypes: true });
-        return entries.map(entry => {
-          const isDir = entry.isDirectory();
-          const nodePath = path.posix.join(relativePath, entry.name);
-          const fullNodePath = path.join(currentPath, entry.name);
-          
-          return {
-            name: entry.name,
-            type: isDir ? 'directory' : 'file',
-            isDir: isDir, // explicitly added for IDE frontend compatibility
-            path: nodePath,
-            size: isDir ? null : fs.statSync(fullNodePath).size,
-            children: isDir ? walk(fullNodePath, nodePath) : undefined,
-          };
-        });
+        return entries
+          .filter(entry => {
+            // Filter out common large/hidden folders for performance and UX
+            const name = entry.name;
+            return !['node_modules', 'venv', '.git', '.DS_Store', 'Thumbs.db', '.venv'].includes(name);
+          })
+          .map(entry => {
+            const isDir = entry.isDirectory();
+            const nodePath = path.posix.join(relativePath, entry.name);
+            const fullNodePath = path.join(currentPath, entry.name);
+            
+            return {
+              name: entry.name,
+              type: isDir ? 'directory' : 'file',
+              isDir: isDir, // explicitly added for IDE frontend compatibility
+              path: nodePath,
+              size: isDir ? null : fs.statSync(fullNodePath).size,
+              children: isDir ? walk(fullNodePath, nodePath) : undefined,
+            };
+          });
       } catch (err) {
         console.error('Failed walking directory:', err);
         return [];
