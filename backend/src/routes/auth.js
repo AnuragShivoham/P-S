@@ -27,8 +27,22 @@ function upsertUser(email, name, extra = {}) {
     db.prepare('INSERT INTO users (id, email, name, role, google_id, avatar) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, email, name, extra.role || 'student', extra.google_id || null, extra.avatar || null);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  } else if (extra.google_id && !user.google_id) {
-    db.prepare('UPDATE users SET google_id=?, avatar=? WHERE id=?').run(extra.google_id, extra.avatar || null, user.id);
+  } else {
+    // Always update role if explicitly provided at login (supports role switching)
+    const updates = [];
+    const params = [];
+    if (extra.role && ['student', 'mentor'].includes(extra.role)) {
+      updates.push('role=?');
+      params.push(extra.role);
+    }
+    if (extra.google_id && !user.google_id) {
+      updates.push('google_id=?', 'avatar=?');
+      params.push(extra.google_id, extra.avatar || null);
+    }
+    if (updates.length > 0) {
+      params.push(user.id);
+      db.prepare(`UPDATE users SET ${updates.join(',')} WHERE id=?`).run(...params);
+    }
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   }
   return user;
@@ -119,10 +133,17 @@ router.post('/google', wrap(async (req, res) => {
   if (!credential) return res.status(400).json({ error: 'credential required' });
 
   // Verify the Google ID token by calling Google's tokeninfo endpoint
-  const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
-  const payload = await googleRes.json();
+  let googleRes, payload;
+  try {
+    googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+    payload = await googleRes.json();
+  } catch (e) {
+    console.error('[Google Auth Error] Fetch/JSON failed:', e.message);
+    return res.status(500).json({ error: 'Failed to connect to Google Auth API: ' + e.message });
+  }
 
   if (!googleRes.ok || payload.error) {
+    console.error('[Google Auth Error] Token invalid:', payload.error || googleRes.status);
     return res.status(401).json({ error: 'Invalid Google token: ' + (payload.error || 'unknown') });
   }
   if (config.GOOGLE_CLIENT_ID && payload.aud !== config.GOOGLE_CLIENT_ID) {
@@ -132,11 +153,7 @@ router.post('/google', wrap(async (req, res) => {
   const { email, name, sub: google_id, picture: avatar } = payload;
   const user = upsertUser(email, name, { google_id, avatar, role });
   
-  // If role was provided and user is new, set it
-  if (role && user.role === 'student') {
-    db.prepare('UPDATE users SET role=? WHERE id=?').run(role, user.id);
-    user.role = role;
-  }
+  // Role is handled by upsertUser above (supports returning users switching roles)
 
   const token = signToken(user);
   res.json({ token, user });

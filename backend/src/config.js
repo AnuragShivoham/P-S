@@ -7,8 +7,11 @@ if (!GROQ_API_KEY) {
 
 module.exports = {
   PORT: process.env.PORT || 3001,
+  LLM_PROVIDER: process.env.LLM_PROVIDER || 'groq', // groq | local (Ollama)
+  OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
   GROQ_API_KEY,
   GROQ_MODEL: 'llama-3.3-70b-versatile',
+  LOCAL_MODEL: process.env.LOCAL_MODEL || 'llama3',
   DB_PATH: process.env.DB_PATH || './data/amitbodhit.db',
   MAX_CLARIFY_ROUNDS: 5,
   QA_PASS_SCORE: 0.70,

@@ -301,6 +301,20 @@ if (!projInfo.includes('is_course')) {
   db.exec("ALTER TABLE projects ADD COLUMN course_version TEXT");
   console.log('[DB] Migrated: added V2 course metadata to projects');
 }
+if (!projInfo.includes('title'))          db.exec("ALTER TABLE projects ADD COLUMN title TEXT");
+if (!projInfo.includes('tech_stack'))     db.exec("ALTER TABLE projects ADD COLUMN tech_stack TEXT DEFAULT '[]'");
+if (!projInfo.includes('scope'))          db.exec("ALTER TABLE projects ADD COLUMN scope TEXT DEFAULT ''");
+if (!projInfo.includes('deadline_days'))  db.exec("ALTER TABLE projects ADD COLUMN deadline_days INTEGER DEFAULT 7");
+if (!projInfo.includes('skill_level'))    db.exec("ALTER TABLE projects ADD COLUMN skill_level TEXT DEFAULT 'beginner'");
+if (!projInfo.includes('deliverables'))   db.exec("ALTER TABLE projects ADD COLUMN deliverables TEXT DEFAULT '[]'");
+if (!projInfo.includes('clarification_history')) db.exec("ALTER TABLE projects ADD COLUMN clarification_history TEXT DEFAULT '[]'");
+if (!projInfo.includes('clarification_round'))   db.exec("ALTER TABLE projects ADD COLUMN clarification_round INTEGER DEFAULT 0");
+if (!projInfo.includes('current_milestone_id'))   db.exec("ALTER TABLE projects ADD COLUMN current_milestone_id TEXT");
+if (!projInfo.includes('current_task_id'))         db.exec("ALTER TABLE projects ADD COLUMN current_task_id TEXT");
+if (!projInfo.includes('total_tasks'))     db.exec("ALTER TABLE projects ADD COLUMN total_tasks INTEGER DEFAULT 0");
+if (!projInfo.includes('completed_tasks')) db.exec("ALTER TABLE projects ADD COLUMN completed_tasks INTEGER DEFAULT 0");
+if (!projInfo.includes('progress_pct'))    db.exec("ALTER TABLE projects ADD COLUMN progress_pct REAL DEFAULT 0");
+if (!projInfo.includes('updated_at'))      db.exec("ALTER TABLE projects ADD COLUMN updated_at TEXT");
 
 // [V2 COURSE ENGINE MIGRATIONS (PHASE 10)]
 const cmInfo = db.prepare("PRAGMA table_info(course_milestones)").all().map(c => c.name);

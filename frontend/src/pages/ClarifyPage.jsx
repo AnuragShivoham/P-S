@@ -25,10 +25,14 @@ export default function ClarifyPage() {
       applyResponse(res);
       if (res.action === 'clarify') {
         navigate('/clarify', { state: { questions: res.clarification_questions, projectId: res.project?.id }, replace: true });
+      } else if (res.action === 'milestones_generated') {
+        setSuccessMsg(res.message);
+        navigate('/confirm-plan');
       } else if (res.action === 'plan_ready') {
         setSuccessMsg(res.message);
         navigate('/dashboard', { replace: true });
       }
+
     } catch(e) { setError(e.message); }
     setLoad(false);
   };

@@ -1,15 +1,23 @@
 const config = require('../config');
 
 async function callClaude(system, userMsg, history = [], maxTokens = 2000, temp = 0.2, isJson = false, image = null) {
-  // aggressive token truncation to survive 12000 TPM limit on Groq Free Tier
+  const isLocal = config.LLM_PROVIDER === 'local';
+  
+  // Truncate based on provider limits (Local usually handled less, but we stay safe)
   const safeSystem = String(system).length > 8000 ? String(system).substring(0, 8000) + '\n...[TRUNCATED]' : system;
   const safeUserMsg = String(userMsg).length > 12000 ? String(userMsg).substring(0, 12000) + '\n...[TRUNCATED_DUE_TO_API_LIMITS]' : String(userMsg);
   
-  // Phase 8: Dynamic Vision Model Switching
+  // Model selection logic
   const hasImage = image && typeof image === 'string' && image.startsWith('data:image');
-  const model = hasImage ? 'llama-3.2-11b-vision-preview' : config.GROQ_MODEL;
+  let model;
   
-  // Build user message content (multi-modal if image present)
+  if (isLocal) {
+    model = config.LOCAL_MODEL;
+  } else {
+    model = hasImage ? 'llama-3.2-11b-vision-preview' : config.GROQ_MODEL;
+  }
+  
+  // Build user message content
   let userContent;
   if (hasImage) {
     userContent = [
@@ -36,22 +44,38 @@ async function callClaude(system, userMsg, history = [], maxTokens = 2000, temp 
     temperature: temp
   };
 
-  // Enable JSON mode if requested (not supported on vision models)
   if (isJson && !hasImage) {
     body.response_format = { type: 'json_object' };
   }
 
-  if (hasImage) console.log(`[Vision] Switching to ${model} for image analysis`);
+  const url = isLocal 
+    ? `${config.OLLAMA_BASE_URL}/v1/chat/completions` 
+    : 'https://api.groq.com/openai/v1/chat/completions';
+    
+  const headers = { 'Content-Type': 'application/json' };
+  if (!isLocal) headers['Authorization'] = `Bearer ${config.GROQ_API_KEY}`;
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.GROQ_API_KEY}` },
-    body: JSON.stringify(body),
-  });
-  
-  const data = await res.json();
-  if (!res.ok) throw new Error(JSON.stringify(data));
-  return data.choices[0].message.content.trim();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000); // 45s timeout
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    
+    const data = await res.json();
+    clearTimeout(timeout);
+
+    if (!res.ok) throw new Error(JSON.stringify(data));
+    return data.choices[0].message.content.trim();
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') throw new Error('AI Request Timed Out (45s). Please try again.');
+    throw e;
+  }
 }
 
 /**
@@ -102,12 +126,10 @@ async function callClaudeJSON(system, userMsg, history = [], maxTokens = 2000) {
     // models often return { "tasks": [...] } or { "items": [...], "count": 10 }.
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const keys = Object.keys(parsed);
-      const arrayKeys = keys.filter(k => Array.isArray(parsed[k]));
-      
-      if (arrayKeys.length === 1 && ['milestones', 'tasks', 'items'].includes(arrayKeys[0])) {
-        const arrayKey = arrayKeys[0];
-        console.log(`[JSON Mode] Auto-unwrapped single array from key: ${arrayKey}`);
-        return parsed[arrayKey];
+      // Auto-unwrap: only if the object has EXACTLY one key and it's an array
+      if (keys.length === 1 && Array.isArray(parsed[keys[0]])) {
+        console.log(`[JSON Mode] Auto-unwrapped single array from key: ${keys[0]}`);
+        return parsed[keys[0]];
       }
     }
     

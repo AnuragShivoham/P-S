@@ -24,7 +24,14 @@ async function generateTasks(milestone, projectCtx) {
     console.error('[Task Planner] AI returned non-array:', res);
     throw new Error('Expected array of tasks');
   }
-  return tasks.map(t => ({ ...t, estimated_hours: Math.min(t.estimated_hours || 2, 4) }));
+  return tasks.map((t, i) => ({ 
+      ...t, 
+      title: t.title || `Task ${i + 1}`,
+      description: t.description || '',
+      estimated_hours: Math.min(t.estimated_hours || 2, 4),
+      commands: Array.isArray(t.commands) ? t.commands : [],
+      concepts_taught: Array.isArray(t.concepts_taught) ? t.concepts_taught : []
+  }));
 }
 
 module.exports = { generateTasks };
