@@ -56,8 +56,12 @@ export default function ProjectsPage() {
       // Determine correct page based on action or status
       if (res.action === 'milestones_generated' || res.project.status === 'planning') {
         navigate('/confirm-plan');
+      } else if (res.action === 'clarify') {
+        navigate('/clarify', { state: { questions: res.questions, projectId: res.project?.id, message: res.message } });
+      } else if (res.action === 'setup') {
+        navigate('/setup', { state: { ...res } });
       } else if (res.project.status === 'clarifying') {
-        navigate('/setup');
+        navigate('/clarify', { state: { projectId: res.project?.id } });
       } else {
         navigate('/dashboard');
       }

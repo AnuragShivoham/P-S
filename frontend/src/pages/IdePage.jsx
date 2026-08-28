@@ -7,7 +7,7 @@ import {
     Play, Loader2, Send, Save, FolderOpen, File,
     PanelRightClose, PanelRightOpen, TerminalSquare, AlertCircle,
     FilePlus, FolderPlus, Pencil, Trash2, GitBranchPlus, RefreshCw, ChevronRight, ChevronDown,
-    MessageSquare, Download, Upload, HardDrive, ArrowLeft, GitCommitHorizontal,
+    MessageSquare, BrainCircuit, Download, Upload, HardDrive, ArrowLeft, GitCommitHorizontal,
     Files, LayoutDashboard, Target, Zap, MapPin,
     Square, CheckSquare, PlayCircle, Puzzle, Monitor, ShieldCheck, User2, Laptop, Palette,
     Monitor as MonitorIcon, Puzzle as PuzzleIcon, PanelLeft, Layout, ExternalLink, X, XCircle, Settings
@@ -350,9 +350,11 @@ export default function IDE() {
     const [isAsking, setIsAsking] = useState(false);
     const [intelligenceData, setIntelligenceData] = useState(null);
     const [loadingIntel, setLoadingIntel] = useState(false);
+    const [integrityError, setIntegrityError] = useState('');
 
     // Learning & Sync Ref
-    const behaviorMetrics = useRef({ pasteSize: 0, typingSpeed: 0, keystrokeCount: 0, sessionStart: Date.now() });
+    const behaviorMetrics = useRef({ pasteSize: 0, typingSpeed: 0, keystrokeCount: 0, charactersAdded: 0, sessionStart: Date.now(), firstEditAt: 0, lastEditAt: 0 });
+    const behaviorReportTimer = useRef(null);
     const [gitPushing, setGitPushing] = useState(false);
     const [localSyncHandle, setLocalSyncHandle] = useState(null);
     const syncDropdownRef = useRef(null);
@@ -366,6 +368,64 @@ export default function IDE() {
     const chatEndRef = useRef(null);
     const fileInputRef = useRef(null);
     const folderInputRef = useRef(null);
+
+    const handleEditorChange = (value, changeEvent) => {
+        const nextValue = value || '';
+        const previousValue = fileContents[activeFile?.path] || '';
+        const delta = Math.max(0, nextValue.length - previousValue.length);
+        const now = Date.now();
+        const metrics = behaviorMetrics.current;
+        if (!metrics.firstEditAt && delta > 0) metrics.firstEditAt = now;
+        const elapsedSinceLastEdit = metrics.lastEditAt ? now - metrics.lastEditAt : 0;
+        const elapsedSinceFirstEdit = metrics.firstEditAt ? now - metrics.firstEditAt : 0;
+        const insertedText = (changeEvent?.changes || []).reduce((total, change) => total + (change.text || '').length, 0);
+        const isLargeInsertion = insertedText >= 100 || delta >= 100;
+        const isRapidBulkEntry = isLargeInsertion && (
+            (previousValue.length === 0 && elapsedSinceFirstEdit < 3000) ||
+            (elapsedSinceLastEdit > 0 && elapsedSinceLastEdit < 300)
+        );
+
+        if (isRapidBulkEntry) {
+            clearTimeout(behaviorReportTimer.current);
+            setFileContents(prev => ({ ...prev, [activeFile.path]: previousValue }));
+            setDirtyFiles(prev => {
+                const next = new Set(prev);
+                next.delete(activeFile.path);
+                return next;
+            });
+            setIntegrityError('Cheat detected: rapid or pasted code was undone. Type your solution manually.');
+            status('Cheat detected: pasted code undone', true);
+            metrics.firstEditAt = 0;
+            metrics.lastEditAt = 0;
+            return;
+        }
+
+        setIntegrityError('');
+        metrics.lastEditAt = now;
+        metrics.keystrokeCount += delta;
+        metrics.charactersAdded += delta;
+        metrics.pasteSize += delta > 100 ? delta : 0;
+        metrics.typingSpeed = delta > 0 && elapsedSinceLastEdit > 0 ? elapsedSinceLastEdit / delta : metrics.typingSpeed;
+
+        if (project?.is_course && currentTask?.id) {
+            clearTimeout(behaviorReportTimer.current);
+            behaviorReportTimer.current = setTimeout(() => {
+                api.logBehavior({
+                    taskId: currentTask.id,
+                    pasteSize: metrics.pasteSize,
+                    typingSpeed: metrics.typingSpeed,
+                    attempts: currentTask.attempts || 0,
+                    timeSpent: Math.round((now - metrics.sessionStart) / 1000),
+                    charactersAdded: metrics.charactersAdded,
+                    elapsedMs: metrics.firstEditAt ? now - metrics.firstEditAt : 0,
+                    wasEmpty: previousValue.length === 0
+                }).catch(() => {});
+            }, 750);
+        }
+
+        setFileContents(prev => ({ ...prev, [activeFile.path]: nextValue }));
+        setDirtyFiles(prev => new Set(prev).add(activeFile.path));
+    };
 
     const status = (msg, err = false) => {
         setStatusMsg(msg); setStatusErr(err);
@@ -418,15 +478,18 @@ export default function IDE() {
 
             // Also load intelligence data
             setLoadingIntel(true);
-            const intelRes = await api.getCurrentTask(project.id, currentTask?.id);
-            setIntelligenceData(intelRes.intelligence);
-            
-            // Sync mentor state
-            if (intelRes.active_mentor_id && project.active_mentor_id !== intelRes.active_mentor_id) {
-                setAuth({ project: { ...project, active_mentor_id: intelRes.active_mentor_id } });
-                status('Human Mentor is now online!', false);
+            try {
+                const intelRes = await api.getCurrentTask(project.id, currentTask?.id);
+                setIntelligenceData(intelRes.intelligence);
+
+                // Sync mentor state
+                if (intelRes.active_mentor_id && project.active_mentor_id !== intelRes.active_mentor_id) {
+                    setAuth({ project: { ...project, active_mentor_id: intelRes.active_mentor_id } });
+                    status('Human Mentor is now online!', false);
+                }
+            } catch (error) {
+                setIntelligenceData(null);
             }
-            
             setLoadingIntel(false);
         } catch (e) { 
             status('Sync Error: ' + e.message, true);
@@ -926,7 +989,11 @@ export default function IDE() {
             }
         };
         ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'output') term.write(m.data); };
-        term.onData(data => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: 'input', data })));
+        term.onData(data => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'input', data }));
+            }
+        });
         
         // Auto-copy terminal selection to clipboard
         term.onSelectionChange(() => {
@@ -1118,8 +1185,13 @@ export default function IDE() {
                     </div>
 
                     <div style={{ flex: 1, minHeight: 0 }}>
+                        {integrityError && (
+                            <div role="alert" style={{ padding: '8px 12px', background: 'rgba(248, 81, 73, 0.14)', borderBottom: '1px solid rgba(248, 81, 73, 0.45)', color: '#ff7b72', fontSize: 12, fontWeight: 700 }}>
+                                {integrityError}
+                            </div>
+                        )}
                         {activeFile ? (
-                            <Editor path={activeFile.path} language={getLanguage(activeFile.name)} theme="vs-dark" value={fileContents[activeFile.path]} onChange={val => { setFileContents(prev => ({ ...prev, [activeFile.path]: val })); setDirtyFiles(prev => new Set(prev).add(activeFile.path)); }} options={{ fontSize: 14, minimap: { enabled: false } }} />
+                                        <Editor path={activeFile.path} language={getLanguage(activeFile.name)} theme="vs-dark" value={fileContents[activeFile.path]} onChange={handleEditorChange} options={{ fontSize: 14, minimap: { enabled: false } }} />
                         ) : (
                             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#484f58' }}>Select a file.</div>
                         )}
@@ -1187,8 +1259,11 @@ export default function IDE() {
                                             </div>
                                         ))}
                                     </div>
-                                    <div style={{ padding: 12, borderTop: '1px solid #30363d' }}>
-                                        <textarea style={{ width: '100%', background: '#010409', color: 'white', borderRadius: 8, padding: 8, border: '1px solid #30363d', resize: 'none' }} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleChat())} placeholder={chatMode === 'AI' ? "Ask AI..." : "Message Mentor..."} />
+                                    <div style={{ padding: 12, borderTop: '1px solid #30363d', background: '#0d1117' }}>
+                                        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, background: '#010409', border: '1px solid #30363d', borderRadius: 8, padding: 6 }}>
+                                            <textarea rows={2} style={{ flex: 1, minWidth: 0, background: 'transparent', color: 'white', border: 'none', padding: '6px 8px', resize: 'none', outline: 'none', fontSize: 12, lineHeight: 1.45 }} value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleChat())} placeholder={chatMode === 'AI' ? "Ask AI..." : "Message Mentor..."} />
+                                            <button onClick={handleChat} disabled={!chatInput.trim() || isAsking} title="Send message" style={{ width: 32, height: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: chatInput.trim() && !isAsking ? '#238636' : '#21262d', color: chatInput.trim() && !isAsking ? '#fff' : '#6e7681', border: 'none', borderRadius: 6, cursor: chatInput.trim() && !isAsking ? 'pointer' : 'not-allowed' }}><Send size={14} /></button>
+                                        </div>
                                     </div>
                                 </div>
                             )}

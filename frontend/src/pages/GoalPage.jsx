@@ -118,6 +118,31 @@ export default function GoalPage() {
           <span style={{ color: '#f85149', fontWeight: 600 }}>Vague goals are rejected.</span>
         </p>
 
+        {/* Flow Stepper */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 40, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 14, left: 30, right: 30, height: 2, background: '#30363d', zIndex: 0 }} />
+          {[
+            "Submit Goal",
+            "Setup page",
+            "Q&A / clarification",
+            "Milestone discussion",
+            "Start project execution"
+          ].map((step, idx) => (
+            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, position: 'relative', zIndex: 1, flex: 1 }}>
+              <div style={{ 
+                width: 30, height: 30, borderRadius: '50%', background: idx === 0 ? '#3fb950' : '#0d1117', 
+                border: idx === 0 ? 'none' : '2px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: idx === 0 ? '#ffffff' : '#8b949e', fontSize: 13, fontWeight: 700 
+              }}>
+                {idx + 1}
+              </div>
+              <div style={{ fontSize: 12, color: idx === 0 ? '#ffffff' : '#8b949e', fontWeight: idx === 0 ? 700 : 500, textAlign: 'center', lineHeight: 1.3, maxWidth: 100 }}>
+                {step}
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Main Input Card */}
         <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 12, padding: '32px 40px', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
             <div style={{ fontSize: 11, color: '#8b949e', fontWeight: 800, textTransform: 'uppercase', marginBottom: 24, letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -96,6 +96,7 @@ export const api = {
   // Auth
   sendOtp: (email) => post('/auth/send-otp', { email }),
   verifyOtp: (email, otp, name, role) => post('/auth/verify-otp', { email, otp, name, role }),
+  loginAdmin: (email, password) => post('/auth/admin-login', { email, password }),
   loginGoogle: (credential, role) => post('/auth/google', { credential, role }),
   updateRole: (role) => req('PUT', '/auth/role', { role }),
   getMe: () => get('/auth/me'),

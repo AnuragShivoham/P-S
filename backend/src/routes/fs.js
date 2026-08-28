@@ -180,31 +180,6 @@ router.delete('/file/:projectId/*', (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /download/:projectId - Download workspace zip
-// ─────────────────────────────────────────────────────────────────────────────
-router.get('/download/:projectId', (req, res) => {
-  try {
-    const { projectId } = req.params;
-    const project = getUserProject(req, projectId);
-    const workspacePath = WorkspaceService.getProjectPath(project.id);
-    
-    if (!require('fs').existsSync(workspacePath)) {
-      return res.status(404).json({ error: 'Workspace not found' });
-    }
-
-    const archiver = require('archiver');
-    const archive = archiver('zip', { zlib: { level: 9 } });
-
-    res.attachment(`${project.title.replace(/[^a-z0-9]/gi, '_') || 'workspace'}.zip`);
-    archive.pipe(res);
-    archive.directory(workspacePath, false);
-    archive.finalize();
-  } catch (err) {
-    console.error('[FS] Download error:', err.message);
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /folder/:projectId/* - Create directory
@@ -451,33 +426,7 @@ router.post('/git-push', async (req, res) => {
   }
 });
 
-router.post('/touch', (req, res) => {
-  try {
-    const project = getUserProject(req, req.body.projectId);
-    const { path: filePath } = req.body;
-    if (!filePath) return res.status(400).json({ error: 'path required' });
 
-    const result = WorkspaceService.writeFile(project.id, filePath, '');
-    res.json(result);
-  } catch (err) {
-    console.error('[FS] Touch error:', err.message);
-    res.status(400).json({ error: err.message });
-  }
-});
-
-router.post('/mkdir', (req, res) => {
-  try {
-    const project = getUserProject(req, req.body.projectId);
-    const { path: dirPath } = req.body;
-    if (!dirPath) return res.status(400).json({ error: 'path required' });
-
-    const result = WorkspaceService.createDirectory(project.id, dirPath);
-    res.json(result);
-  } catch (err) {
-    console.error('[FS] Mkdir error:', err.message);
-    res.status(400).json({ error: err.message });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /init/:projectId - Initialize project workspace

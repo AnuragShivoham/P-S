@@ -7,7 +7,6 @@ import ProgressPanel from '../components/ide/ProgressPanel';
 import { Paperclip, X, ShieldAlert, Zap } from 'lucide-react';
 import ExplainModal from '../components/mentor/ExplainModal';
 
-
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
   return (
@@ -85,6 +84,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
   const [askImage, setAskImage] = useState(null);
   const [asking, setAsking] = useState(false);
   const [started, setStarted] = useState(false);
+  const [cheatModal, setCheatModal] = useState(false);
   const { setCurrentTask, chatLog, addChatMessage } = useStore();
 
   useEffect(() => {
@@ -273,14 +273,36 @@ function TaskPanel({ task, onSubmit, submitting }) {
       {canInteract && (
         <div className="card">
           <label className="lbl">Submit Your Work</label>
-          <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Paste your code + terminal output. No code = auto-fail.</div>
+          <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Type your code + terminal output. Pasting is disabled for submitted work.</div>
           <textarea className="input" rows={7}
-            placeholder={"Paste your code here...\n\nAnd terminal output:\n> Server running on http://localhost:3001\n> GET /health 200 OK"}
+            placeholder={"Type your code here...\n\nAnd terminal output:\n> Server running on http://localhost:3001\n> GET /health 200 OK"}
             value={sub} onChange={e => setSub(e.target.value)}
+            onPaste={(e) => { e.preventDefault(); setCheatModal(true); }}
+            onDrop={(e) => { e.preventDefault(); setCheatModal(true); }}
+            onKeyDown={(e) => {
+              if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') || (e.shiftKey && e.key === 'Insert')) {
+                e.preventDefault();
+                setCheatModal(true);
+              }
+            }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
             <button className="btn btn-p" onClick={handleSub} disabled={submitting || !sub.trim()}>
               {submitting ? <><Spinner />Reviewing...</> : 'Submit for Review →'}
+            </button>
+          </div>
+        </div>
+      )}
+      {cheatModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1117', border: '1px solid #ff4444', borderRadius: 16, padding: 40, width: 440, textAlign: 'center', boxShadow: '0 10px 40px rgba(255, 68, 68, 0.2)' }}>
+            <ShieldAlert size={56} color="#ff4444" style={{ margin: '0 auto 20px' }} />
+            <h2 style={{ color: 'white', marginBottom: 16, fontSize: 28, fontWeight: 900, letterSpacing: '-0.02em' }}>CHEAT DETECTED</h2>
+            <p style={{ color: '#8b949e', marginBottom: 32, fontSize: 15, lineHeight: 1.5 }}>
+              Copy-pasting is strictly disabled! To build real muscle memory and true engineering intuition, you must manually type out your code.
+            </p>
+            <button className="btn" style={{ width: '100%', justifyContent: 'center', background: '#ff4444', borderColor: '#ff4444', color: 'white', fontWeight: 800, fontSize: 16, padding: '12px' }} onClick={() => setCheatModal(false)}>
+              I Understand
             </button>
           </div>
         </div>
@@ -384,14 +406,14 @@ export default function DashboardPage() {
     setSubm(true); setError(''); clearQA();
     try {
       if (project.is_course) {
-        // Send explanation along with the submission to the backend if needed, 
-        // or just log it for learning progress.
-        await api.learningProcess({ type: 'explain', taskId: currentTask.id, explanation });
-        
         const res = await api.submitCourseTask(currentTask.id, project.id);
         if (res.verdict === 'pass') {
-          setSuccessMsg(`✓ Task Passed!`);
-          // Optionally trigger local state refresh if necessary
+          const explanationResult = await api.learningProcess({ type: 'explain', taskId: currentTask.id, explanation });
+          if (!explanationResult.passed) {
+            setError(explanationResult.feedback?.[0]?.message || 'Explanation review failed.');
+          } else {
+            setSuccessMsg(`✓ Task Passed!`);
+          }
         } else {
           setError(res.feedback || 'Validation failed.');
         }

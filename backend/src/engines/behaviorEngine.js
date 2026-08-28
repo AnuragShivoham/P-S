@@ -38,8 +38,14 @@ function calculateScore(data) {
   // 4. Intensity Factor: High Paste + Fast Typing = Clear Cheat
   let editConsistency = (data.pasteSize > 400 && data.typingSpeed < 30) ? 100 : 0; 
 
+  const charactersAdded = Number(data.charactersAdded || data.pasteSize || 0);
+  const elapsedMs = Number(data.elapsedMs || data.timeSpent || 0);
+  const impossibleBulkEntry = charactersAdded >= 200 && elapsedMs > 0 && elapsedMs < 3000;
+  const rapidBulkEntry = charactersAdded >= 500 && data.typingSpeed < 25;
+  const automationFlag = impossibleBulkEntry || rapidBulkEntry ? 100 : 0;
+
   // Weighted Composition (0-100)
-  const score = (pasteScore * 0.3) + (typingPattern * 0.1) + (contextFlag * 0.4) + (editConsistency * 0.2);
+  const score = (pasteScore * 0.25) + (typingPattern * 0.1) + (contextFlag * 0.35) + (editConsistency * 0.15) + (automationFlag * 0.15);
   
   return Math.max(0, Math.min(100, Math.round(score)));
 }

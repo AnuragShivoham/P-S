@@ -6,6 +6,7 @@ const mentorEngine = require('./mentorEngine');
 const crypto = require('crypto');
 const memoryService = require('../services/memoryService');
 const TaskEngine = require('./taskEngine');
+const tracker = require('../services/progressTracker');
 
 function lerp(start, end, amt) {
     return (1 - amt) * start + amt * end;
@@ -15,9 +16,13 @@ const learningController = {
   analyzeBehavior(userId, data) {
     const score = behaviorEngine.calculateScore(data);
     db.prepare(`
-        INSERT INTO behavior_logs (id, user_id, task_id, paste_size, typing_speed, attempts, time_spent, cheat_score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(crypto.randomUUID(), userId, data.taskId, data.pasteSize, data.typingSpeed, data.attempts, data.timeSpent, score);
+        INSERT INTO behavior_logs (id, user_id, task_id, paste_size, typing_speed, attempts, time_spent, characters_added, elapsed_ms, was_empty, cheat_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      crypto.randomUUID(), userId, data.taskId, data.pasteSize || 0, data.typingSpeed || 0,
+      data.attempts || 0, data.timeSpent || 0, data.charactersAdded || 0,
+      data.elapsedMs || 0, data.wasEmpty ? 1 : 0, score
+    );
     
     return { score, directives: this.controlHints(score) };
   },
@@ -270,7 +275,7 @@ const learningController = {
         return { action: 'retry', feedback: [{ type: 'error', message: 'Explanation too short. Write at least 10 characters explaining your approach.' }], passed: false, mentorMode };
       }
 
-      const task = db.prepare('SELECT title, description, concepts_taught FROM course_tasks WHERE id = ?').get(taskId) 
+      const task = db.prepare('SELECT title, description, concepts AS concepts_taught FROM course_tasks WHERE id = ?').get(taskId) 
                    || db.prepare('SELECT title, description, concepts_taught FROM tasks WHERE id = ?').get(taskId);
       
       const taskText = ((task?.title || '') + ' ' + (task?.description || '') + ' ' + (task?.concepts_taught || '')).toLowerCase();
@@ -334,9 +339,16 @@ const learningController = {
 
       // 2. Record Result in QA History (for Error Memory)
       db.prepare(`
-          INSERT INTO qa_reviews (id, task_id, passed, feedback, failed_checks)
-          VALUES (?, ?, ?, ?, ?)
-      `).run(crypto.randomUUID(), taskId, val.success ? 1 : 0, val.feedback, JSON.stringify(val.failed_checks || []));
+          INSERT INTO qa_reviews (id, task_id, attempt_number, verdict, feedback_text, failed_checks)
+          VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        crypto.randomUUID(),
+        taskId,
+        attempts + 1,
+        val.success ? 'pass' : 'fail',
+        val.feedback || '',
+        JSON.stringify(val.failed_checks || [])
+      );
 
       if (val.success) {
         // [MEMORY] Lock state & move to explanation

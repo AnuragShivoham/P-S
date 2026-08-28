@@ -10,6 +10,7 @@ export default function LoginPage() {
   const { setAuth, token } = useStore();
   
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('student');
@@ -71,6 +72,20 @@ export default function LoginPage() {
       } else {
         navigate('/projects');
       }
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  };
+
+  const handleAdminLogin = async () => {
+    if (!email || !password) return setError('Admin email and password are required');
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.loginAdmin(email, password);
+      setAuth(res.user, res.token);
+      navigate('/admin');
     } catch (e) {
       setError(e.message);
     }
@@ -163,13 +178,26 @@ export default function LoginPage() {
               />
             </div>
 
+            {role === 'admin' && (
+              <div style={{ marginBottom: 20 }}>
+                <label className="lbl">Admin Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder="Enter admin password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                />
+              </div>
+            )}
+
             <button 
               className="btn btn-p" 
               style={{ width: '100%', justifyContent: 'center', height: 44 }}
-              onClick={handleSendOtp}
+              onClick={role === 'admin' ? handleAdminLogin : handleSendOtp}
               disabled={loading}
             >
-              {loading ? <Loader2 className="spin" /> : <>Continue with Email <ArrowRight size={16} /></>}
+              {loading ? <Loader2 className="spin" /> : <>{role === 'admin' ? 'Access Admin Dashboard' : 'Continue with Email'} <ArrowRight size={16} /></>}
             </button>
           </div>
         )}

@@ -12,15 +12,62 @@ export default function ClarifyPage() {
     const location = useLocation();
     const { applyResponse, setSuccessMsg, project } = useStore();
     
-    // Support either direct questions or formatted questions from navigation
-    const questions = location.state?.questions || [];
-    const message = location.state?.message || "Architect is analyzing your vision...";
-    const pid = location.state?.projectId || project?.id;
+    const [questions, setQuestions] = useState(location.state?.questions || []);
+    const [message, setMessage] = useState(location.state?.message || "Architect is analyzing your vision...");
+    const [pid, setPid] = useState(location.state?.projectId || project?.id);
+    const [recovering, setRecovering] = useState(!location.state?.questions?.length);
+    const projectId = project?.id;
 
     const [currentStep, setCurrentStep] = useState(0);
     const [answers, setAnswers] = useState({});
     const [loading, setLoad] = useState(false);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (questions.length > 0) {
+            setRecovering(false);
+            return;
+        }
+
+        const savedQuestions = project?.clarification_history
+            ?.slice()
+            .reverse()
+            .find(item => Array.isArray(item.questions) && item.questions.length > 0)?.questions;
+
+        if (savedQuestions?.length) {
+            setQuestions(savedQuestions);
+            setPid(project.id);
+            setRecovering(false);
+            return;
+        }
+
+        if (!projectId) {
+            setRecovering(false);
+            return;
+        }
+
+        let cancelled = false;
+        api.resumeProject(projectId)
+            .then(res => {
+                if (cancelled) return;
+                applyResponse(res);
+                const recovered = res.project?.clarification_history
+                    ?.slice()
+                    .reverse()
+                    .find(item => Array.isArray(item.questions) && item.questions.length > 0)?.questions;
+                if (recovered?.length) {
+                    setQuestions(recovered);
+                    setPid(res.project.id);
+                    setMessage(res.message || message);
+                }
+            })
+            .catch(() => {})
+            .finally(() => {
+                if (!cancelled) setRecovering(false);
+            });
+
+        return () => { cancelled = true; };
+    }, [applyResponse, projectId, questions.length]);
 
     const totalSteps = questions.length;
     const currentQuestion = questions[currentStep];
@@ -80,7 +127,34 @@ export default function ClarifyPage() {
         setLoad(false);
     };
 
-    if (totalSteps === 0) return null;
+    if (recovering) {
+        return (
+            <div style={styles.container}>
+                <div style={styles.recoveryCard}>
+                    <Loader2 className="spin" size={28} color="#3fb950" />
+                    <h1 style={styles.recoveryTitle}>Restoring your project questions</h1>
+                    <p style={styles.recoveryText}>The Architect is loading the saved onboarding step.</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (totalSteps === 0) {
+        return (
+            <div style={styles.container}>
+                <div style={styles.recoveryCard}>
+                    <MessageSquare size={28} color="#f2cc60" />
+                    <h1 style={styles.recoveryTitle}>Project details need a fresh start</h1>
+                    <p style={styles.recoveryText}>
+                        The saved clarification questions are unavailable. Return to the goal page and submit the project again.
+                    </p>
+                    <button onClick={() => navigate('/goal')} style={styles.btnPrimary}>
+                        Return to Goal Page <ArrowRight size={16} />
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div style={styles.container}>
@@ -204,6 +278,22 @@ const styles = {
         boxShadow: '0 32px 64px rgba(0,0,0,0.5)',
         position: 'relative'
     },
+    recoveryCard: {
+        background: '#0d1117',
+        border: '1px solid #30363d',
+        borderRadius: 20,
+        width: '100%',
+        maxWidth: 560,
+        padding: '48px 40px',
+        boxShadow: '0 32px 64px rgba(0,0,0,0.5)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        gap: 16
+    },
+    recoveryTitle: { fontSize: 28, fontWeight: 900, color: '#fff', margin: 0 },
+    recoveryText: { fontSize: 14, color: '#8b949e', lineHeight: 1.6, margin: 0, maxWidth: 420 },
     header: {
         display: 'flex',
         alignItems: 'center',

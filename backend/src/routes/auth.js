@@ -135,6 +135,9 @@ function hydrateUser(user) {
 router.post('/verify-otp', wrap(async (req, res) => {
   const { email, otp, name, role } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
+  if (role === 'admin') {
+    return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
+  }
 
   const now = new Date().toISOString();
   const record = db.prepare(
@@ -157,23 +160,69 @@ router.post('/verify-otp', wrap(async (req, res) => {
   res.json({ token, user });
 }));
 
+// ─── POST /auth/admin-login ──────────────────────────────────────────────────
+router.post('/admin-login', wrap(async (req, res) => {
+  const { email, password } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  if (!normalizedEmail || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  if (!config.ADMIN_EMAILS.includes(normalizedEmail) || password !== config.ADMIN_PASSWORD) {
+    console.warn(`[Auth Security] Failed admin password attempt by ${normalizedEmail}`);
+    return res.status(401).json({ error: 'Invalid admin email or password' });
+  }
+
+  const rawUser = upsertUser(normalizedEmail, normalizedEmail.split('@')[0], { role: 'admin' });
+  const user = hydrateUser(rawUser);
+  const token = signToken(user);
+  res.json({ token, user });
+}));
+
 // ─── POST /auth/google ────────────────────────────────────────────────────────
 // Accepts a Google `credential` (ID token from Google Identity Services)
 router.post('/google', wrap(async (req, res) => {
   const { credential, role } = req.body;
   if (!credential) return res.status(400).json({ error: 'credential required' });
+  if (role === 'admin') {
+    return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
+  }
 
   console.log(`[Google Auth] Attempting token verification for role: ${role || 'unspecified'}`);
 
-  // Verify the Google ID token by calling Google's tokeninfo endpoint
+  // Verify the Google ID token against Google's tokeninfo service.
   let googleRes, payload;
   try {
-    const googleVerifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
-    googleRes = await fetch(googleVerifyUrl);
-    payload = await googleRes.json();
+    const token = encodeURIComponent(credential);
+    const endpoints = [
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${token}`,
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?id_token=${token}`,
+    ];
+    let lastError;
+
+    for (const endpoint of endpoints) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        try {
+          googleRes = await fetch(endpoint, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeout);
+        }
+        payload = await googleRes.json();
+        break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (!googleRes) throw lastError;
   } catch (e) {
     console.error('[Google Auth Critical Error] Network/Fetch failed:', e.message);
-    return res.status(500).json({ error: 'Failed to connect to Google Auth API: ' + e.message });
+    return res.status(503).json({
+      error: 'Google sign-in is temporarily unavailable. Check the backend network/DNS connection and try again.',
+    });
   }
 
   if (!googleRes.ok || payload.error) {

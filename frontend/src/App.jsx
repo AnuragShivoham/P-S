@@ -134,22 +134,40 @@ function AppInner() {
   const { token, projectId, applyResponse, isRehydrating, setRehydrating } = useStore();
   
   useEffect(() => {
-    const handlePaste = (e) => {
-      // Allow pasting in standard inputs (like the Mentor Chat) but block in Code Editor
-      const target = e.target;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
-      
-      // Monaco editor uses a hidden textarea with class "inputarea"
-      if (isInput && !target.classList.contains('inputarea')) {
-          return; // Let normal inputs paste freely
-      }
+    const isCodeEditorTarget = (target) => target?.classList?.contains('inputarea');
+    const warn = (message) => window.alert(message);
 
+    const handlePaste = (e) => {
+      if (!isCodeEditorTarget(e.target)) return;
       e.preventDefault();
-      alert("Code Pasting is disabled to ensure authentic learning and code mastery. Please type your code out manually.");
+      warn('Code pasting is disabled. Type the implementation yourself.');
+    };
+
+    const handleBeforeInput = (e) => {
+      if (!isCodeEditorTarget(e.target)) return;
+      if (e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop') {
+        e.preventDefault();
+        warn('Pasted or dropped code is not allowed.');
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (!isCodeEditorTarget(e.target)) return;
+      const pasteShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+      if (pasteShortcut || (e.shiftKey && e.key === 'Insert')) {
+        e.preventDefault();
+        warn('Code pasting is disabled. Type the implementation yourself.');
+      }
     };
 
     window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
+    window.addEventListener('beforeinput', handleBeforeInput);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+      window.removeEventListener('beforeinput', handleBeforeInput);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   useEffect(() => {

@@ -48,6 +48,51 @@ async function generateMilestones(res, project, extracted) {
   });
 }
 
+async function recoverIncompleteProject(project) {
+  const result = await goalClarifier.clarifyGoal(project.raw_goal, project.clarification_history || []);
+  const refinementOptions = Array.isArray(result.refinement_options)
+    ? result.refinement_options.filter(option => typeof option === 'string' && option.trim())
+    : [];
+
+  if (result.status === 'needs_refinement' && refinementOptions.length > 0) {
+    return { action: 'refine', message: 'This goal is broad. Select a specific model to proceed:', project, options: refinementOptions };
+  }
+
+  if (result.status === 'needs_clarification' && Array.isArray(result.questions) && result.questions.length > 0) {
+    db.prepare("UPDATE projects SET status='clarifying', clarification_history=?, clarification_round=0 WHERE id=?")
+      .run(JSON.stringify([{ questions: result.questions }]), project.id);
+    return {
+      action: 'clarify',
+      message: result.confirmation_text || 'Identifying discovery questions...',
+      project: tracker.getProject(project.id),
+      questions: result.questions
+    };
+  }
+
+  if (result.status === 'needs_setup' || result.missing) {
+    tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
+    return {
+      action: 'setup',
+      message: result.confirmation_text || 'Analyzing project requirements...',
+      project: tracker.getProject(project.id),
+      missing: result.missing,
+      extracted: result.extracted
+    };
+  }
+
+  const extracted = result.extracted || result;
+  const title = extracted.title || project.raw_goal;
+  db.prepare("UPDATE projects SET status='planning', title=?, updated_at=? WHERE id=?")
+    .run(title, new Date().toISOString(), project.id);
+  const planData = await milestoneGenerator.generateMilestones(extracted);
+  return {
+    action: 'milestones_generated',
+    message: planData.reasoning || 'Resuming your project plan...',
+    project: tracker.getProject(project.id),
+    milestones: planData.milestones || planData
+  };
+}
+
 // ── INTERNAL: finalize activation (Step 3) ──────────────────────────────────
 async function finalizeActivation(res, projectId, confirmedMilestones) {
   let project = tracker.getProject(projectId);
@@ -156,41 +201,29 @@ router.post('/goals/submit', wrap(async (req, res) => {
   const project = tracker.createProject(user_id, raw_goal);
   tracker.logTurn(project.id, 'user', raw_goal, 'clarification');
 
-  if (result.status === 'needs_refinement' || result.refinement_options) {
+  const refinementOptions = Array.isArray(result.refinement_options)
+    ? result.refinement_options.filter(option => typeof option === 'string' && option.trim())
+    : [];
+
+  if (result.status === 'needs_refinement' && refinementOptions.length > 0) {
     return res.status(201).json({ 
       action: 'refine', 
       message: "This goal is broad. Select a specific model to proceed:", 
       project: tracker.getProject(project.id), 
-      options: result.refinement_options || []
+      options: refinementOptions
     });
   }
 
-  if (result.status === 'needs_clarification' || result.questions) {
-    db.prepare("UPDATE projects SET status='clarifying' WHERE id=?").run(project.id);
-    return res.status(201).json({ 
-      action: 'clarify', 
-      message: result.confirmation_text || "Identifying discovery questions...", 
-      project: tracker.getProject(project.id), 
-      questions: result.questions || []
-    });
-  }
-
-  if (result.status === 'needs_setup' || result.missing) {
-    tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
-    return res.status(201).json({ 
-      action: 'setup', 
-      message: result.confirmation_text || "Analyzing project requirements...", 
-      project: tracker.getProject(project.id), 
-      missing: result.missing,
-      extracted: result.extracted
-    });
-  }
-
-  if (result.status === 'clear') {
-    return await generateMilestones(res, project, result.extracted || result);
-  }
-
-  await generateMilestones(res, project, result);
+  // Always route to setup to let the user confirm/fill the parameters
+  tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
+  db.prepare("UPDATE projects SET status='clarifying' WHERE id=?").run(project.id);
+  return res.status(201).json({
+    action: 'setup',
+    message: result.confirmation_text || 'Let us define a few project details before building your plan.',
+    project: tracker.getProject(project.id),
+    missing: result.missing || [],
+    extracted: result.extracted || {}
+  });
 }));
 
 
@@ -217,14 +250,18 @@ router.post('/goals/clarify', wrap(async (req, res) => {
   if (result.status === 'rejected') {
     return res.json({ action: 'rejected', message: `Rejected: ${result.reason}` });
   }
-  if (result.status === 'needs_clarification' || result.questions) {
-    history.push({ questions: result.questions });
+  const questions = Array.isArray(result.questions)
+    ? result.questions.filter(question => question && question.id && question.text)
+    : [];
+
+  if (result.status === 'needs_clarification' && questions.length > 0) {
+    history.push({ questions });
     tracker.setClarification(project_id, history, project.clarification_round + 1);
     return res.json({ 
       action: 'clarify', 
       message: result.confirmation_text || "Refining project setup...", 
       project: tracker.getProject(project_id), 
-      questions: result.questions
+      questions
     });
   }
 
@@ -389,32 +426,52 @@ router.post('/courses/tasks/:id/submit', wrap(async (req, res) => {
   const db = require('../db/database');
   const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(courseTaskId);
   if (!courseTask) return res.status(404).json({ error: 'Task missing' });
+  if (courseTask.course_id !== project.course_id) return res.status(403).json({ error: 'Task does not belong to this course project' });
+
+  const behavior = db.prepare(`
+    SELECT cheat_score, paste_size, characters_added, elapsed_ms
+    FROM behavior_logs
+    WHERE user_id = ? AND task_id = ?
+    ORDER BY created_at DESC LIMIT 1
+  `).get(req.user.id, courseTaskId);
+  const bulkEntryDetected = behavior && (
+    behavior.paste_size >= 100 ||
+    (behavior.characters_added >= 200 && behavior.elapsed_ms > 0 && behavior.elapsed_ms < 3000) ||
+    behavior.cheat_score >= 80
+  );
+  if (bulkEntryDetected) {
+    return res.status(422).json({
+      error: 'Learning integrity check: large or unusually rapid code entry detected. Type the solution manually, then submit again.',
+      integrityBlocked: true
+    });
+  }
 
   const WorkspaceService = require('../services/workspaceService');
-  const workspacePath = WorkspaceService.getWorkspacePath(projectId);
+  const workspacePath = WorkspaceService.getProjectPath(projectId);
 
   // BYPASS QA CRITIC -> Static Sandbox Eval
   const result = courseService.validateStaticTask(courseTask, workspacePath);
 
   // User table = progress only (Upsert into course_progress)
   // Ensure attempt counts increment safely
-  db.prepare(`
-    INSERT INTO course_progress (id, project_id, task_id, status, attempts, completed_at)
-    VALUES (?, ?, ?, ?, 1, ?)
-    ON CONFLICT(id) DO UPDATE SET 
-      attempts = attempts + 1,
-      status = excluded.status,
-      completed_at = excluded.completed_at
-  `).run(
-    require('uuid').v4(), 
-    projectId, 
-    courseTaskId, 
-    result.passed ? 'passed' : 'failed', 
-    result.passed ? new Date().toISOString() : null
-  );
+  const progress = db.prepare('SELECT id FROM course_progress WHERE project_id = ? AND task_id = ?').get(projectId, courseTaskId);
+  const nextStatus = result.passed ? 'awaiting_explanation' : 'failed';
+  if (progress) {
+    db.prepare(`
+      UPDATE course_progress
+      SET attempts = attempts + 1, status = ?, completed_at = NULL, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(nextStatus, progress.id);
+  } else {
+    db.prepare(`
+      INSERT INTO course_progress (id, user_id, project_id, task_id, status, attempts)
+      VALUES (?, ?, ?, ?, ?, 1)
+    `).run(require('uuid').v4(), req.user.id, projectId, courseTaskId, nextStatus);
+  }
 
   res.json({
     verdict: result.passed ? 'pass' : 'fail',
+    passed: result.passed,
     feedback: result.passed ? 'Excellent work! Everything looks correct.' : result.hint,
     corrections: [] // No AI suggestions mapped
   });
@@ -425,10 +482,10 @@ router.post('/courses/tasks/:id/submit', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/courses/behavior/log', auth, wrap(async (req, res) => {
   const learningController = require('../engines/learningController');
-  const { taskId, pasteSize, typingSpeed, attempts, timeSpent } = req.body;
+  const { taskId, pasteSize, typingSpeed, attempts, timeSpent, charactersAdded, elapsedMs, wasEmpty } = req.body;
   if (!taskId) return res.status(400).json({ error: 'Missing course task context' });
   
-  const result = learningController.analyzeBehavior(req.user.id, { taskId, pasteSize, typingSpeed, attempts, timeSpent });
+  const result = learningController.analyzeBehavior(req.user.id, { taskId, pasteSize, typingSpeed, attempts, timeSpent, charactersAdded, elapsedMs, wasEmpty });
   res.json(result); 
 }));
 
@@ -473,6 +530,9 @@ router.get('/projects/latest', wrap(async (req, res) => {
   if (!state || !state.project || state.project.user_id !== userId) return res.json({ project: null });
 
   const { project } = state;
+  if (project.status === 'active' && !state.milestone && !state.task) {
+    return res.json(await recoverIncompleteProject(project));
+  }
   if (project.status === 'planning') {
     const extracted = {
         title: project.title,
@@ -547,6 +607,10 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
         project,
         milestones
     });
+  }
+
+  if (project.status === 'active' && !milestone && !task) {
+    return res.json(await recoverIncompleteProject(project));
   }
 
   // COURSE PROJECT: Fetch from course_milestones + course_tasks
@@ -1191,12 +1255,21 @@ router.get('/projects/active', wrap(async (req, res) => {
 // GET /tasks/current - modular task loader
 router.get('/tasks/current', wrap(async (req, res) => {
     const projectId = req.query.projectId;
-    const taskId = req.query.taskId;
+  let taskId = req.query.taskId;
     
     if (!projectId || !taskId) return res.status(400).json({ error: 'Missing projectId or taskId' });
 
     const p = tracker.getProject(projectId);
     if (!p) return res.status(404).json({ error: 'Project not found' });
+    if (p.user_id !== req.user.id && req.user.role !== 'mentor' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!taskId || (p.is_course
+      ? !db.prepare('SELECT id FROM course_tasks WHERE id = ?').get(taskId)
+      : !tracker.getTask(taskId))) {
+      taskId = p.current_task_id || null;
+    }
 
     let task = null;
     let progressStatus = 'pending';
@@ -1983,11 +2056,6 @@ router.put('/admin/users/:id/role', adminOnly, wrap(async (req, res) => {
   if (!['student', 'mentor', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, req.params.id);
   res.json({ success: true });
-}));
-
-router.get('/projects/:id/progress', auth, wrap(async (req, res) => {
-  const data = await learningController.getProjectProgress(req.params.id);
-  res.json(data);
 }));
 
 module.exports = router;

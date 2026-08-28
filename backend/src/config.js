@@ -10,7 +10,7 @@ module.exports = {
   LLM_PROVIDER: process.env.LLM_PROVIDER || 'groq', // groq | ollama
   OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
   GROQ_API_KEY,
-  GROQ_MODEL: 'llama-3.3-70b-versatile',
+  GROQ_MODEL: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
   LOCAL_MODEL: process.env.LOCAL_MODEL || 'phi3:mini', // Use phi3:mini for speed
   DB_PATH: process.env.DB_PATH || './data/amitbodhit.db',
   MAX_CLARIFY_ROUNDS: 10,
@@ -22,5 +22,6 @@ module.exports = {
   EMAIL_USER: process.env.EMAIL_USER || '',
   EMAIL_PASS: process.env.EMAIL_PASS || '',
   EMAIL_FROM: process.env.EMAIL_FROM || 'AMIT-BODHIT <no-reply@amitbodhit.app>',
-  ADMIN_EMAILS: (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(e => e),
+  ADMIN_EMAILS: (process.env.ADMIN_EMAILS || 'vermaanni2003@gmail.com').split(',').map(e => e.trim().toLowerCase()).filter(e => e),
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || '',
 };

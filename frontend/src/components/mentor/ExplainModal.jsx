@@ -54,6 +54,11 @@ export default function ExplainModal({ onSubmit, onClose, loading, externalQuest
                     style={styles.textarea}
                     rows={6}
                     autoFocus
+                    onPaste={e => e.preventDefault()}
+                    onDrop={e => e.preventDefault()}
+                    onKeyDown={e => {
+                        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' || (e.shiftKey && e.key === 'Insert')) e.preventDefault();
+                    }}
                 />
 
                 <div style={styles.footer}>

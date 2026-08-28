@@ -28,12 +28,12 @@ export default function SetupPage() {
   const { missing = {}, extracted = {}, message = "" } = location.state || {};
   const pid = project?.id || extracted?.id;
 
-  const [skill, setSkill] = useState('');
-  const [time, setTime] = useState(null);
-  const [type, setType] = useState('');
-  const [stack, setStack] = useState('');
-  const [isStackAuto, setIsStackAuto] = useState(true);
-  const [features, setFeatures] = useState([]);
+  const [skill, setSkill] = useState(extracted.skill || '');
+  const [time, setTime] = useState(extracted.time || null);
+  const [type, setType] = useState(extracted.type || '');
+  const [stack, setStack] = useState(extracted.stack ? (Array.isArray(extracted.stack) ? extracted.stack.join(', ') : extracted.stack) : '');
+  const [isStackAuto, setIsStackAuto] = useState(!extracted.stack || extracted.stack.length === 0);
+  const [features, setFeatures] = useState(Array.isArray(extracted.features) ? extracted.features : []);
   const [newFeature, setNewFeature] = useState('');
   
   const [loading, setLoad] = useState(false);

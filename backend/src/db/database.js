@@ -210,8 +210,13 @@ db.exec(`
     last_scaffold_level INTEGER DEFAULT 1,
     last_hint_used INTEGER DEFAULT 0,
     started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
     help_requested INTEGER DEFAULT 0,
     active_mentor_id TEXT,
+    last_help_request DATETIME,
+    failure_consistency INTEGER DEFAULT 0,
+    last_error_hash TEXT,
+    interventions_count INTEGER DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -222,6 +227,13 @@ db.exec(`
     cheat_score INTEGER,
     paste_score INTEGER,
     typing_pattern INTEGER,
+    paste_size INTEGER DEFAULT 0,
+    typing_speed REAL DEFAULT 0,
+    attempts INTEGER DEFAULT 0,
+    time_spent REAL DEFAULT 0,
+    characters_added INTEGER DEFAULT 0,
+    elapsed_ms INTEGER DEFAULT 0,
+    was_empty INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -257,6 +269,8 @@ db.exec(`
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
     task_id TEXT NOT NULL,
+    level INTEGER NOT NULL DEFAULT 1,
+    hint_text TEXT NOT NULL DEFAULT '',
     requested_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -456,5 +470,25 @@ if (!ctInfo2.includes('commands'))    db.exec("ALTER TABLE course_tasks ADD COLU
 
 const chatInfo = db.prepare("PRAGMA table_info(chat_history)").all().map(c => c.name);
 if (!chatInfo.includes('role')) db.exec("ALTER TABLE chat_history ADD COLUMN role TEXT DEFAULT 'student'");
+
+const behaviorInfo = db.prepare("PRAGMA table_info(behavior_logs)").all().map(c => c.name);
+if (!behaviorInfo.includes('paste_size')) db.exec("ALTER TABLE behavior_logs ADD COLUMN paste_size INTEGER DEFAULT 0");
+if (!behaviorInfo.includes('typing_speed')) db.exec("ALTER TABLE behavior_logs ADD COLUMN typing_speed REAL DEFAULT 0");
+if (!behaviorInfo.includes('attempts')) db.exec("ALTER TABLE behavior_logs ADD COLUMN attempts INTEGER DEFAULT 0");
+if (!behaviorInfo.includes('time_spent')) db.exec("ALTER TABLE behavior_logs ADD COLUMN time_spent REAL DEFAULT 0");
+if (!behaviorInfo.includes('characters_added')) db.exec("ALTER TABLE behavior_logs ADD COLUMN characters_added INTEGER DEFAULT 0");
+if (!behaviorInfo.includes('elapsed_ms')) db.exec("ALTER TABLE behavior_logs ADD COLUMN elapsed_ms INTEGER DEFAULT 0");
+if (!behaviorInfo.includes('was_empty')) db.exec("ALTER TABLE behavior_logs ADD COLUMN was_empty INTEGER DEFAULT 0");
+
+const hintInfo = db.prepare("PRAGMA table_info(hint_requests)").all().map(c => c.name);
+if (!hintInfo.includes('level')) db.exec("ALTER TABLE hint_requests ADD COLUMN level INTEGER NOT NULL DEFAULT 1");
+if (!hintInfo.includes('hint_text')) db.exec("ALTER TABLE hint_requests ADD COLUMN hint_text TEXT NOT NULL DEFAULT ''");
+
+const progressInfo = db.prepare("PRAGMA table_info(course_progress)").all().map(c => c.name);
+if (!progressInfo.includes('completed_at')) db.exec("ALTER TABLE course_progress ADD COLUMN completed_at DATETIME");
+if (!progressInfo.includes('last_help_request')) db.exec("ALTER TABLE course_progress ADD COLUMN last_help_request DATETIME");
+if (!progressInfo.includes('failure_consistency')) db.exec("ALTER TABLE course_progress ADD COLUMN failure_consistency INTEGER DEFAULT 0");
+if (!progressInfo.includes('last_error_hash')) db.exec("ALTER TABLE course_progress ADD COLUMN last_error_hash TEXT");
+if (!progressInfo.includes('interventions_count')) db.exec("ALTER TABLE course_progress ADD COLUMN interventions_count INTEGER DEFAULT 0");
 
 module.exports = db;
