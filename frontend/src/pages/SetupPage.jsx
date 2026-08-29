@@ -112,7 +112,9 @@ export default function SetupPage() {
 
   return (
     <div className="goal-pg" style={{ 
-      background: '#010409', 
+      background: 'linear-gradient(135deg, #010409, #0d1117, #060913)',
+      backgroundSize: '400% 400%',
+      animation: 'gradientMesh 15s ease infinite',
       display: 'block', 
       overflowY: 'auto', 
       padding: '80px 20px',
@@ -121,29 +123,31 @@ export default function SetupPage() {
       <style>{`
         .mcq-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 40px; }
         .mcq-btn {
-          background: #0d1117;
-          border: 1px solid #21262d;
+          background: rgba(13, 17, 23, 0.4);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid var(--glass-border);
           border-radius: 16px;
           padding: 24px;
           cursor: pointer;
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
           text-align: left;
           position: relative;
           color: #8b949e;
         }
-        .mcq-btn:hover { border-color: #58a6ff; background: rgba(56, 139, 253, 0.06); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
-        .mcq-btn.active { border-color: #2ea043; background: rgba(46, 160, 67, 0.07); color: white; box-shadow: 0 0 0 1px rgba(46,160,67,0.2), 0 4px 16px rgba(0,0,0,0.3); }
-        .mcq-btn.active .icon-box { color: #3fb950; }
-        .icon-box { color: #484f58; margin-bottom: 16px; transition: color 0.2s; }
-        .mcq-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+        .mcq-btn:hover { border-color: rgba(88, 166, 255, 0.5); background: rgba(56, 139, 253, 0.08); transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+        .mcq-btn.active { border-color: rgba(63, 185, 80, 0.6); background: rgba(46, 160, 67, 0.1); color: white; box-shadow: inset 0 0 20px rgba(63, 185, 80, 0.15), 0 8px 24px rgba(0,0,0,0.4); }
+        .mcq-btn.active .icon-box { color: #3fb950; filter: drop-shadow(0 0 8px rgba(63,185,80,0.5)); }
+        .icon-box { color: #484f58; margin-bottom: 16px; transition: all 0.3s; }
+        .mcq-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; font-family: var(--sans); }
         .mcq-desc { font-size: 12px; opacity: 0.65; line-height: 1.5; }
-        .setup-label { color: #3fb950; font-family: monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .setup-label { color: #3fb950; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
         .setup-label::before { content: ''; display: block; width: 24px; height: 1px; background: #3fb950; opacity: 0.5; }
-        .setup-section { background: #0d1117; border: 1px solid #21262d; border-radius: 16px; padding: 28px; }
+        .setup-section { background: rgba(13, 17, 23, 0.4); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 16px; padding: 28px; }
       `}</style>
 
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        <header style={{ marginBottom: 60, textAlign: 'left' }}>
+        <header className="anim-slide-up" style={{ marginBottom: 60, textAlign: 'left', opacity: 0, animationDelay: '0.1s' }}>
           <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 12, fontFamily: 'monospace' }}>
             // PROJECT CONFIGURATION : ID_{pid?.slice(-6).toUpperCase()}
           </div>
@@ -158,7 +162,7 @@ export default function SetupPage() {
         </header>
 
         {/* 1. Skill Level */}
-        <section>
+        <section className="anim-slide-up" style={{ opacity: 0, animationDelay: '0.2s' }}>
           <span className="setup-label">01. Experience Level</span>
           <div className="mcq-group">
             {[
@@ -175,7 +179,7 @@ export default function SetupPage() {
           </div>
         </section>
 
-        <section>
+        <section className="anim-slide-up" style={{ opacity: 0, animationDelay: '0.3s' }}>
           <span className="setup-label">02. Time Commitment</span>
           <div className="mcq-group">
             {[
@@ -206,7 +210,7 @@ export default function SetupPage() {
         </section>
 
         {/* 3. Project Type */}
-        <section>
+        <section className="anim-slide-up" style={{ opacity: 0, animationDelay: '0.4s' }}>
           <span className="setup-label">03. Project Model</span>
           <div className="mcq-group">
             {[
@@ -225,7 +229,7 @@ export default function SetupPage() {
         </section>
 
         {/* 4. Tech Stack */}
-        <section style={{ marginBottom: 60 }}>
+        <section className="anim-slide-up" style={{ marginBottom: 60, opacity: 0, animationDelay: '0.5s' }}>
           <span className="setup-label">04. Tech Stack Choice</span>
           <div className="setup-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -249,7 +253,7 @@ export default function SetupPage() {
         </section>
 
         {/* 5. Features */}
-        <section>
+        <section className="anim-slide-up" style={{ opacity: 0, animationDelay: '0.6s' }}>
           <span className="setup-label">05. Implementation Backlog</span>
           <div className="setup-section">
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
