@@ -10,7 +10,7 @@ import ExplainModal from '../components/mentor/ExplainModal';
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
   return (
-    <div className="sidebar">
+    <div className="sidebar glass-panel" style={{ margin: '16px', borderRadius: '16px', height: 'calc(100vh - 32px)', border: '1px solid var(--glass-border)' }}>
       <div style={{ padding: '0 0 20px 0', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>CURRENT PROJECT</div>
         <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tx)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
@@ -154,7 +154,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
   return (
     <div>
       {/* Task card */}
-      <div className="card">
+      <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.1s', opacity: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
           <div style={{ flex: 1, paddingRight: 12 }}>
             <div className="task-meta">Day {task.day} · {task.estimated_hours}h est · attempt {task.attempts || 0}</div>
@@ -217,7 +217,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
 
       {/* Ask guidance */}
       {canInteract && (
-        <div className="card">
+        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.2s', opacity: 0 }}>
           <label className="lbl">Ask for Guidance</label>
           <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Be specific. Vague questions get vague hints.</div>
           {askImage && (
@@ -271,7 +271,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
 
       {/* Submission */}
       {canInteract && (
-        <div className="card">
+        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.3s', opacity: 0 }}>
           <label className="lbl">Submit Your Work</label>
           <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Type your code + terminal output. Pasting is disabled for submitted work.</div>
           <textarea className="input" rows={7}
@@ -315,8 +315,8 @@ function TaskPanel({ task, onSubmit, submitting }) {
 function MilestonesTab({ milestones }) {
   return (
     <div>
-      {(Array.isArray(milestones) ? milestones : []).map(m => (
-        <div key={m.id} className="card">
+      {(Array.isArray(milestones) ? milestones : []).map((m, idx) => (
+        <div key={m.id} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${idx * 0.1}s`, opacity: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 15, fontWeight: 800, color: 'var(--tx)', marginBottom: 3 }}>
@@ -347,7 +347,7 @@ function AutomationsTab({ automations = [] }) {
   return (
     <div>
       {(Array.isArray(automations) ? automations : []).map((a, i) => (
-        <div key={i} className="card">
+        <div key={i} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${i * 0.1}s`, opacity: 0 }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
             <span style={{ background: 'var(--b-dim)', color: 'var(--blue)', border: '1px solid rgba(91,138,245,.2)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
               {a.tool}
@@ -438,9 +438,9 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="dash">
+    <div className="dash" style={{ background: 'linear-gradient(135deg, #010409, #0d1117, #060913)', backgroundSize: '400% 400%', animation: 'gradientMesh 15s ease infinite' }}>
       <Sidebar project={project} milestones={milestones} onNew={() => { reset(); navigate('/'); }} />
-      <div className="dash-main">
+      <div className="dash-main anim-slide-up" style={{ animationDelay: '0.1s', opacity: 0 }}>
 
         {/* Project Context Header */}
         <div style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
