@@ -60,7 +60,9 @@ export default function GoalPage() {
 
   return (
     <div className="goal-pg" style={{ 
-      background: '#010409', 
+      background: 'linear-gradient(135deg, #010409, #0d1117, #060913)',
+      backgroundSize: '400% 400%',
+      animation: 'gradientMesh 15s ease infinite',
       display: 'flex', 
       flexDirection: 'column', 
       alignItems: 'center', 
@@ -101,15 +103,15 @@ export default function GoalPage() {
         .chip-refine:hover { border-color: #58a6ff; background: rgba(56, 139, 253, 0.1); }
       `}</style>
 
-      <div className="terminal-box" style={{ width: '100%', maxWidth: 720 }}>
+      <div className="terminal-box anim-slide-up" style={{ width: '100%', maxWidth: 720 }}>
         
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#3fb950', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.15em', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#3fb950', fontFamily: 'var(--mono)', fontSize: 13, letterSpacing: '0.15em', marginBottom: 16 }}>
           <Terminal size={16} />
           <span>// INITIALIZE PROJECT</span>
         </div>
 
-        <h1 style={{ fontSize: 56, fontWeight: 900, color: 'white', marginBottom: 16, letterSpacing: '-0.04em', lineHeight: 1 }}>
+        <h1 style={{ fontSize: 56, fontWeight: 900, color: 'white', marginBottom: 16, letterSpacing: '-0.04em', lineHeight: 1, fontFamily: 'var(--display)' }}>
           What are you <br/> building?
         </h1>
         
@@ -144,7 +146,7 @@ export default function GoalPage() {
         </div>
 
         {/* Main Input Card */}
-        <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 12, padding: '32px 40px', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+        <div className="glass-card anim-slide-up" style={{ padding: '32px 40px', position: 'relative', animationDelay: '0.1s', opacity: 0 }}>
             <div style={{ fontSize: 11, color: '#8b949e', fontWeight: 800, textTransform: 'uppercase', marginBottom: 24, letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 8 }}>
               PROJECT GOAL
             </div>
@@ -155,7 +157,7 @@ export default function GoalPage() {
               onChange={e => setGoal(e.target.value)}
               placeholder="* Clear, structured, actionable banking communication&#10;* Without introducing errors or assumptions"
               rows={5}
-              style={{ width: '100%', background: 'transparent', border: 'none', color: '#e6edf3', fontFamily: 'SFMono-Regular, Consolas, monospace', fontSize: 18, resize: 'none', outline: 'none', lineHeight: 1.6 }}
+              style={{ width: '100%', background: 'transparent', border: 'none', color: '#e6edf3', fontFamily: 'var(--mono)', fontSize: 18, resize: 'none', outline: 'none', lineHeight: 1.6, textShadow: '0 0 10px rgba(230, 237, 243, 0.1)' }}
               onKeyDown={e => e.ctrlKey && e.key === 'Enter' && handleSubmit()}
             />
 
@@ -177,8 +179,8 @@ export default function GoalPage() {
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 40, borderTop: '1px solid #30363d', paddingTop: 24 }}>
-              <div style={{ fontSize: 12, color: '#484f58', fontFamily: 'monospace' }}>Ctrl+Enter to submit</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 40, borderTop: '1px solid var(--glass-border)', paddingTop: 24 }}>
+              <div style={{ fontSize: 12, color: '#484f58', fontFamily: 'var(--mono)' }}>Ctrl+Enter to submit</div>
               <button className="btn-green" onClick={() => handleSubmit()} disabled={loading || !goal.trim()}>
                   {loading ? <Loader2 className="spin" size={18} /> : <>SUBMIT GOAL <ArrowRight size={18} /></>}
               </button>
@@ -192,7 +194,7 @@ export default function GoalPage() {
               { icon: <Shield size={20} />, label: "Strict QA every task" },
               { icon: <RefreshCw size={20} />, label: "Resume anytime" }
             ].map((f, i) => (
-              <div key={i} style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 8, padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: '#484f58' }}>
+              <div key={i} className="glass-panel anim-slide-up" style={{ padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: '#8b949e', animationDelay: `${0.2 + i * 0.1}s`, opacity: 0 }}>
                 {f.icon}
                 <div style={{ fontSize: 11, fontWeight: 600, textAlign: 'center' }}>{f.label}</div>
               </div>
