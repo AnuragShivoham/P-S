@@ -25,7 +25,8 @@ function upsertUser(email, name, extra = {}) {
   let user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
   
   // Security Check: Only allow admin role if email is in whitelist
-  let targetRole = extra.role || 'student';
+  const ALLOWED_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
+  let targetRole = ALLOWED_ROLES.includes(extra.role) ? extra.role : 'student';
   if (targetRole === 'admin') {
     const isAdmin = config.ADMIN_EMAILS.includes(normalizedEmail);
     if (!isAdmin) {
@@ -43,7 +44,8 @@ function upsertUser(email, name, extra = {}) {
     // Always update role if explicitly provided at login (supports role switching)
     const updates = [];
     const params = [];
-    if (extra.role && ['student', 'mentor', 'admin'].includes(extra.role)) {
+    const ALLOWED_SWITCHABLE_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
+    if (extra.role && ALLOWED_SWITCHABLE_ROLES.includes(extra.role)) {
       // Check permission for switching to admin
       if (extra.role === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
         console.warn(`[Auth Security] User ${normalizedEmail} blocked from switching to ADMIN`);
@@ -149,8 +151,12 @@ function hydrateUser(user) {
 router.post('/verify-otp', wrap(async (req, res) => {
   const { email, otp, name, role, action } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
+  const ALLOWED_OTP_ROLES = ['student', 'mentor', 'citizen', 'university'];
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
+  }
+  if (role && !ALLOWED_OTP_ROLES.includes(role)) {
+    return res.status(400).json({ error: 'Invalid role specified.' });
   }
 
   const now = new Date().toISOString();
