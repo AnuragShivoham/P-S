@@ -260,7 +260,7 @@ export default function ProjectDetailPage() {
 
 const st = {
     page: { minHeight: '100vh', background: '#0d1117', color: '#c9d1d9', padding: '24px 32px 60px', fontFamily: 'var(--sans)' },
-    loadingScreen: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0d1117', color: '#8b949e', gap: 12, flexDirection: 'column' },
+    loadingScreen: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 52px)', background: '#0d1117', color: '#8b949e', gap: 12, flexDirection: 'column' },
     backBtn: { display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 12, padding: '6px 0', marginBottom: 24 },
 
     layout: { display: 'flex', gap: 32, maxWidth: 1000, margin: '0 auto' },

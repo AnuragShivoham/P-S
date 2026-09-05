@@ -41,7 +41,7 @@ html,body,#root{height:100%;background:var(--bg);color:var(--tx);font-family:var
 ::selection{background:rgba(61,220,132,.2);color:var(--green)}
 
 /* APP SHELL */
-.app{display:flex;flex-direction:column;height:100vh;overflow:hidden;min-height:0}
+.app{display:flex;flex-direction:column;height:100vh;overflow-y:auto;overflow-x:hidden;min-height:0}
 
 /* HEADER */
 .hdr{display:flex;align-items:center;gap:14px;padding:0 22px;height:52px;background:var(--bg-s);border-bottom:1px solid var(--border);flex-shrink:0;position:relative;z-index:50}

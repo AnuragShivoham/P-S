@@ -24,6 +24,16 @@ import CourseBuilderPage from './pages/CourseBuilderPage';
 import AdminPage from './pages/AdminPage';
 import OnboardingPage from './pages/OnboardingPage';
 
+// Societal Problems Feature
+import SocietalProblemsPage from './pages/SocietalProblemsPage';
+import ProblemSubmitPage from './pages/ProblemSubmitPage';
+import ProblemDetailPage from './pages/ProblemDetailPage';
+import ProjectArchitecturePage from './pages/ProjectArchitecturePage';
+import ProjectTeamPage from './pages/ProjectTeamPage';
+import ProjectRequirementsPage from './pages/ProjectRequirementsPage';
+import ProjectImpactPage from './pages/ProjectImpactPage';
+import CitizenDashboardPage from './pages/CitizenDashboardPage';
+
 function Header() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -49,21 +59,38 @@ function Header() {
       
       {token && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
-          <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Projects</button>
-          {projectId && (
+          {/* Citizen role nav */}
+          {role === 'citizen' && (
+            <>
+              <button onClick={() => navigate('/citizen-dashboard')} style={navBtn('My Problems', '/citizen-dashboard')}>📋 My Problems</button>
+              <button onClick={() => navigate('/problems/submit')} style={navBtn('Submit', '/problems/submit')}>➕ Submit Problem</button>
+            </>
+          )}
+          {/* Student role nav */}
+          {role === 'student' && (
+            <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Projects</button>
+          )}
+          {role === 'student' && projectId && (
             <button onClick={() => navigate('/dashboard')} style={navBtn('Dashboard', '/dashboard')}>Dashboard</button>
+          )}
+          {/* Societal Problems — visible to student, mentor, university, admin */}
+          {(role === 'student' || role === 'mentor' || role === 'university' || role === 'admin') && (
+            <button onClick={() => navigate('/problems')} style={navBtn('Problems', '/problems')}>🌍 Problems</button>
           )}
           {role === 'student' && (
             <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
           )}
-          {role === 'mentor' && (
+          {(role === 'mentor' || role === 'university') && (
             <>
               <button onClick={() => navigate('/mentor')} style={navBtn('Intervention', '/mentor')}>Intervention</button>
               <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>
             </>
           )}
           {role === 'admin' && (
-            <button onClick={() => navigate('/admin')} style={navBtn('Admin', '/admin')}>Platform Admin</button>
+            <>
+              <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Projects</button>
+              <button onClick={() => navigate('/admin')} style={navBtn('Admin', '/admin')}>Platform Admin</button>
+            </>
           )}
         </div>
       )}
@@ -113,7 +140,7 @@ function ProtectedRoute({ children }) {
 function MentorRoute({ children }) {
   const { token, role } = useStore();
   if (!token) return <Navigate to="/login" replace />;
-  if (role !== 'mentor' && role !== 'admin') return <Navigate to="/projects" replace />;
+  if (role !== 'mentor' && role !== 'university' && role !== 'admin') return <Navigate to="/projects" replace />;
   return children;
 }
 
@@ -124,11 +151,19 @@ function AdminRoute({ children }) {
   return children;
 }
 
+function CitizenRoute({ children }) {
+  const { token, role } = useStore();
+  if (!token) return <Navigate to="/login" replace />;
+  if (role !== 'citizen') return <Navigate to="/" replace />;
+  return children;
+}
+
 function HomeRedirect() {
   const { token, role } = useStore();
   if (!token) return <Navigate to="/login" replace />;
   if (role === 'admin') return <Navigate to="/admin" replace />;
-  if (role === 'mentor') return <Navigate to="/mentor" replace />;
+  if (role === 'mentor' || role === 'university') return <Navigate to="/mentor" replace />;
+  if (role === 'citizen') return <Navigate to="/citizen-dashboard" replace />;
   return <Navigate to="/projects" replace />;
 }
 
@@ -254,6 +289,23 @@ function AppInner() {
         <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
         <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
         <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />
+
+        {/* ── Societal Problems Feature ─────────────────────────────── */}
+        {/* Public: anyone (logged in or not) can browse */}
+        <Route path="/problems" element={<SocietalProblemsPage />} />
+        {/* Problem submit requires auth */}
+        <Route path="/problems/submit" element={<ProtectedRoute><ProblemSubmitPage /></ProtectedRoute>} />
+        <Route path="/problems/:id" element={<ProblemDetailPage />} />
+
+        {/* Citizen Dashboard */}
+        <Route path="/citizen-dashboard" element={<CitizenRoute><CitizenDashboardPage /></CitizenRoute>} />
+
+        {/* Project Extensions — require auth */}
+        <Route path="/projects/:id/architecture" element={<ProtectedRoute><ProjectArchitecturePage /></ProtectedRoute>} />
+        <Route path="/projects/:id/team" element={<ProtectedRoute><ProjectTeamPage /></ProtectedRoute>} />
+        <Route path="/projects/:id/requirements" element={<ProtectedRoute><ProjectRequirementsPage /></ProtectedRoute>} />
+        <Route path="/projects/:id/impact" element={<ProtectedRoute><ProjectImpactPage /></ProtectedRoute>} />
+
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>
     </div>
