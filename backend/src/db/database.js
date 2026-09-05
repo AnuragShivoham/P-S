@@ -340,6 +340,31 @@ if (!cols.includes('tech_stack')) {
   db.exec("ALTER TABLE users ADD COLUMN tech_stack TEXT DEFAULT '[]'");
   console.log('[DB] Migrated: added tech_stack to users');
 }
+// ─── Onboarding metadata migrations ──────────────────────────────────────────
+if (!cols.includes('onboarded')) {
+  db.exec("ALTER TABLE users ADD COLUMN onboarded INTEGER DEFAULT 0");
+  console.log('[DB] Migrated: added onboarded to users');
+}
+if (!cols.includes('use_case')) {
+  db.exec("ALTER TABLE users ADD COLUMN use_case TEXT");
+  console.log('[DB] Migrated: added use_case to users');
+}
+if (!cols.includes('profession')) {
+  db.exec("ALTER TABLE users ADD COLUMN profession TEXT");
+  console.log('[DB] Migrated: added profession to users');
+}
+if (!cols.includes('team_size')) {
+  db.exec("ALTER TABLE users ADD COLUMN team_size TEXT");
+  console.log('[DB] Migrated: added team_size to users');
+}
+if (!cols.includes('primary_goals')) {
+  db.exec("ALTER TABLE users ADD COLUMN primary_goals TEXT DEFAULT '[]'");
+  console.log('[DB] Migrated: added primary_goals to users');
+}
+if (!cols.includes('referral_source')) {
+  db.exec("ALTER TABLE users ADD COLUMN referral_source TEXT");
+  console.log('[DB] Migrated: added referral_source to users');
+}
 
 const projInfo = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
 if (!projInfo.includes('is_course')) {

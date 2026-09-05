@@ -10,7 +10,7 @@ import ExplainModal from '../components/mentor/ExplainModal';
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
 function Sidebar({ project, milestones, onNew }) {
   return (
-    <div className="sidebar glass-panel" style={{ margin: '16px', borderRadius: '16px', height: 'calc(100vh - 32px)', border: '1px solid var(--glass-border)' }}>
+    <div className="sidebar glass-panel" style={{ margin: '16px', borderRadius: '16px', height: 'calc(100% - 32px)', border: '1px solid var(--glass-border)', overflowY: 'auto' }}>
       <div style={{ padding: '0 0 20px 0', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <div style={{ fontSize: 9, color: 'var(--tx-d)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 4 }}>CURRENT PROJECT</div>
         <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tx)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>

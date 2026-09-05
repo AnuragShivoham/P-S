@@ -37,6 +37,7 @@ const get = p => req('GET', p);
 const post = (p, b) => req('POST', p, b);
 export const api = {
   req,
+  post,
   createUser: (email, name, skill_level) => post('/users', { email, name, skill_level }),
   getUser: (id) => get(`/users/${id}`),
   submitGoal: (uid, rg) => post('/goals/submit', { user_id: uid, raw_goal: rg }),
@@ -94,8 +95,8 @@ export const api = {
   submitCommunityProject: (data) => post('/projects/community/submit', data),
 
   // Auth
-  sendOtp: (email) => post('/auth/send-otp', { email }),
-  verifyOtp: (email, otp, name, role) => post('/auth/verify-otp', { email, otp, name, role }),
+  sendOtp: (email, action) => post('/auth/send-otp', { email, action }),
+  verifyOtp: (email, otp, name, role, action) => post('/auth/verify-otp', { email, otp, name, role, action }),
   loginAdmin: (email, password) => post('/auth/admin-login', { email, password }),
   loginGoogle: (credential, role) => post('/auth/google', { credential, role }),
   updateRole: (role) => req('PUT', '/auth/role', { role }),

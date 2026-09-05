@@ -1,36 +1,35 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { GoogleLogin } from '@react-oauth/google';
-import { Mail, Shield, ShieldAlert, User, GraduationCap, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Shield, ShieldAlert, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
 
-export default function LoginPage() {
+export default function SignupPage() {
   const navigate = useNavigate();
   const { setAuth, token } = useStore();
   
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
+  const [otp, setOtp] = useState('');
   const [role, setRole] = useState('student');
-  const [step, setStep] = useState('login'); // login, otp, role
+  const [step, setStep] = useState('signup'); // signup, otp
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
-  // If already logged in, redirect to dashboard or goal
+  // If already logged in, redirect
   useEffect(() => {
     if (token) navigate('/');
   }, [token, navigate]);
 
   const handleSendOtp = async () => {
     if (!email) return setError('Email is required');
+    if (!name) return setError('Name is required');
     setLoading(true);
     setError('');
     try {
-      const res = await api.sendOtp(email, 'login');
+      const res = await api.sendOtp(email, 'signup');
       setMsg(res.message);
       setStep('otp');
     } catch (e) {
@@ -44,7 +43,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.verifyOtp(email, otp, name, role, 'login');
+      const res = await api.verifyOtp(email, otp, name, role, 'signup');
       setAuth(res.user, res.token);
       if (res.user.role === 'mentor') {
         navigate('/mentor');
@@ -55,41 +54,6 @@ export default function LoginPage() {
       } else {
         navigate('/projects');
       }
-    } catch (e) {
-      setError(e.message);
-    }
-    setLoading(false);
-  };
-
-  const handleGoogleSuccess = async (response) => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await api.loginGoogle(response.credential, role);
-      setAuth(res.user, res.token);
-      if (res.user.role === 'mentor') {
-        navigate('/mentor');
-      } else if (res.user.role === 'admin') {
-        navigate('/admin');
-      } else if (!res.user.onboarded) {
-        navigate('/onboarding');
-      } else {
-        navigate('/projects');
-      }
-    } catch (e) {
-      setError(e.message);
-    }
-    setLoading(false);
-  };
-
-  const handleAdminLogin = async () => {
-    if (!email || !password) return setError('Admin email and password are required');
-    setLoading(true);
-    setError('');
-    try {
-      const res = await api.loginAdmin(email, password);
-      setAuth(res.user, res.token);
-      navigate('/admin');
     } catch (e) {
       setError(e.message);
     }
@@ -99,16 +63,14 @@ export default function LoginPage() {
   return (
     <div className="goal-pg fade-in">
       <div className="goal-box" style={{ maxWidth: 420 }}>
-        <div className="g-eye">{step === 'role' ? 'CHOOSE YOUR PATH' : 'SECURE ACCESS'}</div>
+        <div className="g-eye">CREATE ACCOUNT</div>
         <h1 className="g-h1">
-          {step === 'login' && 'Welcome Back'}
-          {step === 'otp' && 'Verify Identity'}
-          {step === 'role' && 'Select Role'}
+          {step === 'signup' && 'Join AMIT-BODHIT'}
+          {step === 'otp' && 'Verify Email'}
         </h1>
         <p className="g-sub">
-          {step === 'login' && 'Sign in to access your AI mentor and project dashboard.'}
+          {step === 'signup' && 'Create your account to start your AI-guided journey.'}
           {step === 'otp' && `We've sent a 6-digit code to ${email}.`}
-          {step === 'role' && 'Are you here to learn or to guide others?'}
         </p>
 
         {error && (
@@ -123,7 +85,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {step === 'login' && (
+        {step === 'signup' && (
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
               <label className="lbl">Role Selection</label>
@@ -152,23 +114,15 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: 24, marginBottom: 24 }}>
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => setError('Google Login Failed')}
-                theme="filled_black"
-                shape="pill"
-                width="320"
-                text="signin_with"
+            <div style={{ marginBottom: 16 }}>
+              <label className="lbl">Full Name</label>
+              <input 
+                type="text" 
+                className="input" 
+                placeholder="John Doe"
+                value={name}
+                onChange={e => setName(e.target.value)}
               />
-            </div>
-
-            <div style={{ position: 'relative', textAlign: 'center', marginBottom: 24 }}>
-              <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
-              <span style={{ 
-                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                background: 'var(--bg)', padding: '0 12px', color: 'var(--tx-m)', fontSize: 10, letterSpacing: '.1em'
-              }}>OR EMAIL</span>
             </div>
 
             <div style={{ marginBottom: 20 }}>
@@ -182,32 +136,19 @@ export default function LoginPage() {
               />
             </div>
 
-            {role === 'admin' && (
-              <div style={{ marginBottom: 20 }}>
-                <label className="lbl">Admin Password</label>
-                <input
-                  type="password"
-                  className="input"
-                  placeholder="Enter admin password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-              </div>
-            )}
-
             <button 
               className="btn btn-p" 
               style={{ width: '100%', justifyContent: 'center', height: 44 }}
-              onClick={role === 'admin' ? handleAdminLogin : handleSendOtp}
+              onClick={handleSendOtp}
               disabled={loading}
             >
-              {loading ? <Loader2 className="spin" /> : <>{role === 'admin' ? 'Access Admin Dashboard' : 'Continue with Email'} <ArrowRight size={16} /></>}
+              {loading ? <Loader2 className="spin" /> : <>Sign Up <ArrowRight size={16} /></>}
             </button>
 
             <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: 'var(--tx-2)' }}>
-              Don't have an account?{' '}
-              <Link to="/signup" style={{ color: '#58a6ff', textDecoration: 'none' }}>
-                Sign Up
+              Already have an account?{' '}
+              <Link to="/login" style={{ color: '#58a6ff', textDecoration: 'none' }}>
+                Sign In
               </Link>
             </div>
           </div>
@@ -239,9 +180,9 @@ export default function LoginPage() {
             <button 
               className="btn" 
               style={{ width: '100%', marginTop: 12, background: 'transparent', color: 'var(--tx-2)' }}
-              onClick={() => setStep('login')}
+              onClick={() => setStep('signup')}
             >
-              Back to Sign In
+              Back to Sign Up
             </button>
           </div>
         )}

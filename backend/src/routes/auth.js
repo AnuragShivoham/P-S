@@ -80,13 +80,23 @@ function getTransporter() {
 
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
 router.post('/send-otp', wrap(async (req, res) => {
-  const { email } = req.body;
+  const { email, action } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Valid email required' });
   }
 
+  const normalizedEmail = email.toLowerCase();
+  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+
+  if (action === 'login' && !userExists) {
+    return res.status(404).json({ error: 'Account not found. Please sign up first.' });
+  }
+  if (action === 'signup' && userExists) {
+    return res.status(409).json({ error: 'Account already exists. Please log in.' });
+  }
+
   let otp = String(Math.floor(100000 + Math.random() * 900000));
-  if (email.toLowerCase() === 'test@example.com') {
+  if (normalizedEmail === 'test@example.com') {
     otp = '123456';
   }
   
@@ -128,12 +138,16 @@ function hydrateUser(user) {
   try {
     user.tech_stack = typeof user.tech_stack === 'string' ? JSON.parse(user.tech_stack || '[]') : (user.tech_stack || []);
   } catch(e) { user.tech_stack = []; }
+  try {
+    user.primary_goals = typeof user.primary_goals === 'string' ? JSON.parse(user.primary_goals || '[]') : (user.primary_goals || []);
+  } catch(e) { user.primary_goals = []; }
+  user.onboarded = user.onboarded === 1 || user.onboarded === true;
   return user;
 }
 
 // ─── POST /auth/verify-otp ────────────────────────────────────────────────────
 router.post('/verify-otp', wrap(async (req, res) => {
-  const { email, otp, name, role } = req.body;
+  const { email, otp, name, role, action } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
@@ -149,7 +163,17 @@ router.post('/verify-otp', wrap(async (req, res) => {
   // Mark used
   db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
 
-  const rawUser = upsertUser(email.toLowerCase(), name || email.split('@')[0], { role });
+  const normalizedEmail = email.toLowerCase();
+  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+
+  if (action === 'login' && !userExists) {
+    return res.status(404).json({ error: 'Account not found. Please sign up first.' });
+  }
+  if (action === 'signup' && userExists) {
+    return res.status(409).json({ error: 'Account already exists. Please log in.' });
+  }
+
+  const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { role });
   
   if (role === 'admin' && rawUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access Denied: Your email is not authorized for Admin access.' });
@@ -247,6 +271,13 @@ router.post('/google', wrap(async (req, res) => {
 
   // Consistently lowercase email to prevent SQLite UNIQUE collisions across case-sensitivity boundaries
   const normalizedEmail = email.toLowerCase();
+  
+  // Check if user exists for Google login (only allow login, not signup)
+  let userRecord = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  if (!userRecord) {
+    return res.status(401).json({ error: 'Account not found. Please sign up first.' });
+  }
+
   const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { google_id, avatar, role });
   
   if (role === 'admin' && rawUser.role !== 'admin') {
@@ -296,6 +327,48 @@ router.get('/me', wrap(async (req, res) => {
   } catch (e) {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
+}));
+
+// ─── POST /auth/onboard ──────────────────────────────────────────────────────
+// Called after signup/login to persist onboarding survey answers.
+// Admins and mentors are excluded — they bypass onboarding entirely.
+router.post('/onboard', wrap(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Authorization required' });
+
+  const token = authHeader.replace('Bearer ', '');
+  let payload;
+  try { payload = jwt.verify(token, config.JWT_SECRET); }
+  catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
+
+  // Admins and mentors don't do onboarding
+  if (payload.role === 'admin' || payload.role === 'mentor') {
+    return res.status(403).json({ error: 'Onboarding does not apply to admin or mentor accounts.' });
+  }
+
+  const { use_case, profession, team_size, primary_goals, referral_source } = req.body;
+
+  db.prepare(`
+    UPDATE users SET
+      onboarded = 1,
+      use_case = ?,
+      profession = ?,
+      team_size = ?,
+      primary_goals = ?,
+      referral_source = ?
+    WHERE id = ?
+  `).run(
+    use_case || null,
+    profession || null,
+    team_size || null,
+    JSON.stringify(primary_goals || []),
+    referral_source || null,
+    payload.id
+  );
+
+  const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id));
+  const newToken = signToken(user);
+  res.json({ success: true, token: newToken, user });
 }));
 
 module.exports = router;

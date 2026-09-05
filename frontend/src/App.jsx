@@ -11,6 +11,7 @@ import DashboardPage from './pages/DashboardPage';
 import CompletePage from './pages/CompletePage';
 import IdePage from './pages/IdePage';
 import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
 import SetupPage from './pages/SetupPage';
 import PlanConfirmationPage from './pages/PlanConfirmationPage';
 
@@ -21,13 +22,14 @@ import MarketplacePage from './pages/MarketplacePage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import CourseBuilderPage from './pages/CourseBuilderPage';
 import AdminPage from './pages/AdminPage';
+import OnboardingPage from './pages/OnboardingPage';
 
 function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const { project, projectId, userName, token, avatar, logout, role } = useStore();
   const onDash = location.pathname === '/dashboard';
-  const onLogin = location.pathname === '/login';
+  const onLogin = location.pathname === '/login' || location.pathname === '/signup';
 
   if (onLogin || location.pathname === '/ide') return null;
 
@@ -233,6 +235,7 @@ function AppInner() {
       <Header />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
         <Route path="/" element={<HomeRedirect />} />
         <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
         <Route path="/goal" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
@@ -240,6 +243,7 @@ function AppInner() {
         <Route path="/setup" element={<ProtectedRoute><SetupPage /></ProtectedRoute>} />
         <Route path="/confirm-plan" element={<ProtectedRoute><PlanConfirmationPage /></ProtectedRoute>} />
 
+        <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
 
         <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />

@@ -6,6 +6,7 @@ export const useStore = create((set, get) => ({
   role:     localStorage.getItem('ab_role') || null,
   avatar:   localStorage.getItem('ab_avatar')|| null,
   techStack: JSON.parse(localStorage.getItem('ab_skills') || '[]'),
+  onboarded: localStorage.getItem('ab_onboarded') === '1',
   projectId: localStorage.getItem('ab_pid') || null,
   taskId:    localStorage.getItem('ab_tid') || null,
   chatLog:  [],
@@ -15,6 +16,7 @@ export const useStore = create((set, get) => ({
     localStorage.setItem('ab_uname', user.name);
     localStorage.setItem('ab_token', token);
     localStorage.setItem('ab_role',  user.role);
+    localStorage.setItem('ab_onboarded', user.onboarded ? '1' : '0');
     if (user.avatar) localStorage.setItem('ab_avatar', user.avatar);
     if (user.tech_stack) localStorage.setItem('ab_skills', JSON.stringify(user.tech_stack));
     
@@ -24,8 +26,17 @@ export const useStore = create((set, get) => ({
       token: token, 
       role: user.role, 
       avatar: user.avatar || null,
-      techStack: user.tech_stack || []
+      techStack: user.tech_stack || [],
+      onboarded: !!user.onboarded,
     });
+  },
+
+  setOnboarded: (val, token, user) => {
+    localStorage.setItem('ab_onboarded', val ? '1' : '0');
+    const update = { onboarded: val };
+    if (token) { localStorage.setItem('ab_token', token); update.token = token; }
+    if (user)  { localStorage.setItem('ab_uname', user.name); update.userName = user.name; }
+    set(update);
   },
 
   setUser: (id, name) => {
@@ -43,7 +54,8 @@ export const useStore = create((set, get) => ({
     localStorage.removeItem('ab_skills');
     localStorage.removeItem('ab_pid');
     localStorage.removeItem('ab_tid');
-    set({ userId: null, userName: null, token: null, role: null, avatar: null, techStack: [], project: null, milestones: [], currentTask: null, projectId: null, taskId: null });
+    localStorage.removeItem('ab_onboarded');
+    set({ userId: null, userName: null, token: null, role: null, avatar: null, techStack: [], project: null, milestones: [], currentTask: null, projectId: null, taskId: null, onboarded: false });
   },
 
   project:     null,
