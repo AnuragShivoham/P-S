@@ -1,7 +1,7 @@
 # P-S Architecture Baseline (R0)
 
 ## Overview
-**AMIT-BODHIT (P-S)** is an AI-powered project mentoring and skill acceleration platform combining project planning, code editing, terminal execution, live learning scaffolding, and automated QA reviews.
+**SOCRATES (P-S)** is an AI-powered project mentoring and skill acceleration platform combining project planning, code editing, terminal execution, live learning scaffolding, and automated QA reviews.
 
 ---
 
@@ -45,7 +45,7 @@
 
 ## 2. Core Existing Entities & State
 
-### Database Schema (SQLite: `./data/amitbodhit.db`)
+### Database Schema (SQLite: `./data/socrates.db`)
 - `users`: User profiles, role (`student`, `mentor`, `admin`), active project pointers, skills.
 - `projects`: Primary project record (`raw_goal`, `title`, `tech_stack`, `scope`, `deadline_days`, `status`, `is_course`, `course_id`).
 - `milestones`: Ordered milestones belonging to a project (`duration_days`, `measurable_output`, `status`).

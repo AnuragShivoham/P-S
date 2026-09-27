@@ -1,6 +1,6 @@
 const { callClaudeJSON } = require('../db/claude');
 
-const SYSTEM = `You are AMIT-BODHIT task planner.
+const SYSTEM = `You are SOCRATES task planner.
 Convert one milestone into daily actionable tasks.
 
 RULES:

@@ -503,7 +503,7 @@ export default function ProblemDetailPage() {
               {/* AI Summary Banner */}
               <div style={styles.aiHighlightCard}>
                 <div style={styles.aiBadge}>
-                  <Sparkles size={14} color="#58a6ff" /> AMIT-BODHIT Problem Intelligence Engine
+                  <Sparkles size={14} color="#58a6ff" /> SOCRATES Problem Intelligence Engine
                 </div>
                 <h3 style={styles.aiSummaryTitle}>{analysis.problem_statement || analysis.summary}</h3>
                 <p style={styles.aiSummaryDesc}>{analysis.summary}</p>
@@ -871,7 +871,7 @@ export default function ProblemDetailPage() {
               Initialize Active Engineering Project
             </h3>
             <p style={{ fontSize: 13, color: '#8b949e', margin: '0 0 16px 0', lineHeight: 1.5 }}>
-              This will create a dedicated engineering project workspace in AMIT-BODHIT. 
+              This will create a dedicated engineering project workspace in SOCRATES. 
               The problem's technical requirements and constraints will be pre-seeded into the project backlog.
             </p>
 

@@ -206,7 +206,7 @@ export default function ProjectDetailPage() {
                                     <BookOpen size={18} color="#58a6ff" />
                                     <div>
                                         <div style={{ fontWeight: 700, color: '#e6edf3', fontSize: 13 }}>On-Demand Hints & Tasks</div>
-                                        <div style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.4 }}>Real-time guidance and debugging support are provided for every generated task by your AMIT-BODHIT Mentor.</div>
+                                        <div style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.4 }}>Real-time guidance and debugging support are provided for every generated task by your SOCRATES Mentor.</div>
                                     </div>
                                 </div>
                             </div>

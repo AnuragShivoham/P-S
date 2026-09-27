@@ -30,7 +30,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'AMIT-BODHIT', version: '1.0.0' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'SOCRATES', version: '1.0.0' }));
 app.use('/api/v1/preview', previewRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/media', mediaRouter);
@@ -77,7 +77,7 @@ server.on('upgrade', (request, socket, head) => {
 server.listen(config.PORT, () => {
   console.log(`
  ╔══════════════════════════════════════╗
- ║  AMIT-BODHIT Backend                 ║
+ ║  SOCRATES Backend                    ║
  ║  http://localhost:${config.PORT}              ║
  ╚══════════════════════════════════════╝`);
 });

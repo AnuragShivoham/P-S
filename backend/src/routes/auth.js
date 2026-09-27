@@ -112,10 +112,10 @@ router.post('/send-otp', wrap(async (req, res) => {
     await transporter.sendMail({
       from: config.EMAIL_FROM,
       to: email,
-      subject: 'Your AMIT-BODHIT login code',
+      subject: 'Your SOCRATES login code',
       html: `
         <div style="font-family:monospace;background:#0d0d0d;color:#e6edf3;padding:32px;border-radius:12px;max-width:480px">
-          <h2 style="color:#58a6ff;margin:0 0 8px">AMIT-BODHIT</h2>
+          <h2 style="color:#58a6ff;margin:0 0 8px">SOCRATES</h2>
           <p style="color:#8b949e;margin:0 0 24px">Your one-time login code:</p>
           <div style="font-size:36px;font-weight:900;letter-spacing:10px;color:#3fb950;margin-bottom:24px">${otp}</div>
           <p style="color:#8b949e;font-size:12px">Expires in 10 minutes. Do not share this code.</p>

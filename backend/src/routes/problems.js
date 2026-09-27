@@ -956,7 +956,7 @@ router.post('/:id/create-course', wrap(async (req, res) => {
     INSERT INTO course_tasks (id, course_id, milestone_id, title, description, position, file_path, starter_template)
     VALUES
       (?, ?, ?, 'Review Problem Context & Requirements Specification', 'Study the citizen problem report and define the system interfaces.', 0, 'REQUIREMENTS.md', '# Problem Requirements\n- Analyze stakeholder needs\n- Specify data validation rules'),
-      (?, ?, ?, 'Bootstrap Core Solution Workspace', 'Initialize backend service and configure connection endpoints.', 1, 'server.js', '// AMIT-BODHIT Societal Solution Entrypoint\nconst express = require("express");\nconst app = express();\napp.listen(3000);')
+      (?, ?, ?, 'Bootstrap Core Solution Workspace', 'Initialize backend service and configure connection endpoints.', 1, 'server.js', '// SOCRATES Societal Solution Entrypoint\nconst express = require("express");\nconst app = express();\napp.listen(3000);')
   `).run(`ct_${uuidv4()}`, courseId, m1Id, `ct_${uuidv4()}`, courseId, m2Id);
 
   const createdCourse = db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId);

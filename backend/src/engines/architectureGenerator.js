@@ -2,7 +2,7 @@ const { callClaudeJSON } = require('../db/claude');
 const db = require('../db/database');
 const { v4: uuidv4 } = require('uuid');
 
-const ARCH_SYSTEM_PROMPT = `You are the AMIT-BODHIT Principal Solutions Architect.
+const ARCH_SYSTEM_PROMPT = `You are the SOCRATES Principal Solutions Architect.
 Your task is to generate a comprehensive, enterprise-grade system architecture and technical blueprint for a project addressing a critical real-world societal challenge.
 
 RULES:

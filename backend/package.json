@@ -1,7 +1,7 @@
 {
-  "name": "amit-bodhit-backend",
+  "name": "socrates-backend",
   "version": "1.0.0",
-  "description": "AMIT-BODHIT AI Project Mentor - Node.js Backend",
+  "description": "SOCRATES AI Project Mentor - Node.js Backend",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

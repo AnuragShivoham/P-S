@@ -15,7 +15,7 @@ class MCPService {
             console.log(`[MCP] Connecting to server: ${name}...`);
             const transport = new StdioClientTransport({ command, args });
             const client = new Client({
-                name: "AMIT-BODHIT-Core",
+                name: "SOCRATES-Core",
                 version: "1.0.0"
             }, {
                 capabilities: {

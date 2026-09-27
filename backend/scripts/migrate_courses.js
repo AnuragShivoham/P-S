@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 require('dotenv').config();
 
-const dbPath = process.env.DB_PATH || './data/amitbodhit.db';
+const dbPath = process.env.DB_PATH || './data/socrates.db';
 const db = new Database(dbPath);
 
 try {

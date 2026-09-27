@@ -2,7 +2,7 @@ const { callClaudeJSON } = require('../db/claude');
 const db = require('../db/database');
 const { v4: uuidv4 } = require('uuid');
 
-const SYSTEM_PROMPT = `You are the AMIT-BODHIT Societal Problem Intelligence Engine.
+const SYSTEM_PROMPT = `You are the SOCRATES Societal Problem Intelligence Engine.
 Your task is to transform informal, emotional, or unstructured citizen-reported problems into a highly structured, objective, and actionable technical and project definition for engineering teams, university researchers, and mentors.
 
 RULES:

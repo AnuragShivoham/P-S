@@ -379,7 +379,7 @@ router.post('/git-clone', async (req, res) => {
 router.post('/git-push', async (req, res) => {
   try {
     const project = getUserProject(req, req.body.projectId);
-    const { message = 'AMIT-BODHIT: auto-save checkpoint' } = req.body;
+    const { message = 'SOCRATES: auto-save checkpoint' } = req.body;
     
     const workspacePath = WorkspaceService.getProjectPath(project.id);
     

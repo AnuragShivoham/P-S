@@ -224,7 +224,7 @@ export default function ProblemSubmitPage() {
                 Automated AI Intelligence In Progress
               </div>
               <div style={{ color: '#8b949e', fontSize: 12, marginTop: 3 }}>
-                AMIT-BODHIT Problem Intelligence is structuring your problem into technical requirements, 
+                SOCRATES Problem Intelligence is structuring your problem into technical requirements, 
                 detecting potential duplicates, and preparing project milestones for engineers.
               </div>
             </div>

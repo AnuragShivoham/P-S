@@ -278,7 +278,7 @@ class WorkspaceService {
       'package.json': JSON.stringify({
         name: 'project',
         version: '1.0.0',
-        description: 'Project for AMIT-BODHIT',
+        description: 'Project for SOCRATES',
         main: 'index.js',
         scripts: { start: 'node index.js' },
         keywords: [],

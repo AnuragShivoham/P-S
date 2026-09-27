@@ -91,7 +91,7 @@ export default function SignupPage() {
       <div className="goal-box" style={{ maxWidth: 420 }}>
         <div className="g-eye">CREATE ACCOUNT</div>
         <h1 className="g-h1">
-          {step === 'signup' && 'Join AMIT-BODHIT'}
+          {step === 'signup' && 'Join SOCRATES'}
           {step === 'otp' && 'Verify Email'}
         </h1>
         <p className="g-sub">

@@ -53,7 +53,7 @@ function Header() {
   return (
     <header className="hdr">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate(role === 'mentor' ? '/mentor' : '/projects')}>
-        <div className="logo">AMIT-BODHIT</div>
+        <div className="logo">SOCRATES</div>
         <div className="logo-sub">AI Development Hub</div>
       </div>
       

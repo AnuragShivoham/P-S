@@ -1,5 +1,5 @@
 const { DatabaseSync } = require('node:sqlite');
-const db = new DatabaseSync('./data/amitbodhit.db');
+const db = new DatabaseSync('./data/socrates.db');
 const users = db.prepare("SELECT id, email, name FROM users WHERE email LIKE 'o%' OR name LIKE 'o%'").all();
 console.log('--- USERS ---');
 console.log(JSON.stringify(users, null, 2));

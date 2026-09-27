@@ -1,4 +1,4 @@
-# PROJECT-SKILL (AMIT-BODHIT) - Feature Implementation Summary
+# PROJECT-SKILL (SOCRATES) - Feature Implementation Summary
 
 ## Completed Implementation
 
@@ -238,9 +238,9 @@
 # Backend
 PORT=3001
 NODE_ENV=development
-DB_PATH=./data/amitbodhit.db
+DB_PATH=./data/socrates.db
 WORKSPACE_PATH=./workspace
-JWT_SECRET=amit-bodhit-secret-change-in-prod
+JWT_SECRET=SOCRATES-secret-change-in-prod
 GROQ_API_KEY=required
 FRONTEND_URL=http://localhost:5173
 
@@ -395,7 +395,7 @@ VITE_WS_URL=ws://localhost:3001
 
 ## License & Credits
 
-**Project**: PROJECT-SKILL (AMIT-BODHIT)
+**Project**: PROJECT-SKILL (SOCRATES)
 **Purpose**: AI-powered project execution mentor
 **License**: MIT
 **Version**: 1.0.0
@@ -422,10 +422,10 @@ http://localhost:5173
 curl http://localhost:3001/health
 
 # View database
-sqlite3 backend/data/amitbodhit.db ".tables"
+sqlite3 backend/data/socrates.db ".tables"
 
 # Reset database (development only)
-rm backend/data/amitbodhit.db
+rm backend/data/socrates.db
 npm run dev  # Recreates on startup
 ```
 

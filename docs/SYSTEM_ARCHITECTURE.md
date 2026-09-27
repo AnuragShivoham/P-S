@@ -1,4 +1,4 @@
-# PROJECT-SKILL (AMIT-BODHIT) - System Architecture
+# PROJECT-SKILL (SOCRATES) - System Architecture
 
 ## Overview
 

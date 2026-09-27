@@ -1,4 +1,4 @@
-# Project-Skill (AMIT-BODHIT) - Final Fixes
+# Project-Skill (SOCRATES) - Final Fixes
 
 ## Current Status
 - [x] Full platform code (DB/API/pages/IDE/chat/terminal)

@@ -311,7 +311,7 @@ export default function OnboardingPage() {
         {/* Header */}
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 10, letterSpacing: '.15em', color: '#58a6ff', fontFamily: 'var(--mono)', marginBottom: 4 }}>
-            AMIT-BODHIT
+            SOCRATES
           </div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: '#e6edf3', fontFamily: 'var(--sans)', margin: 0 }}>
             Let's personalise your experience
@@ -357,7 +357,7 @@ export default function OnboardingPage() {
           {currentStep === 'use_case' && (
             <div>
               <div style={{ fontSize: 16, fontWeight: 700, color: '#e6edf3', marginBottom: 6, fontFamily: 'var(--sans)' }}>
-                How do you plan to use AMIT-BODHIT?
+                How do you plan to use SOCRATES?
               </div>
               <div style={{ fontSize: 12, color: 'var(--tx-2)', marginBottom: 20, fontFamily: 'var(--sans)' }}>
                 Press <kbd style={{ background: 'var(--bg-o)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', fontSize: 10 }}>1</kbd>–<kbd style={{ background: 'var(--bg-o)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', fontSize: 10 }}>{USE_CASES.length}</kbd> to select quickly

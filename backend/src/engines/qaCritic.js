@@ -1,6 +1,6 @@
 const { callClaudeJSON } = require('../db/claude');
 
-const SYSTEM = `You are AMIT-BODHIT QA engine. Validate user task submissions.
+const SYSTEM = `You are SOCRATES QA engine. Validate user task submissions.
 
 RULES:
 - Direct. No praise. No motivation.

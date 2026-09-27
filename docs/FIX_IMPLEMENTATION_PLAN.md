@@ -6,7 +6,7 @@
 
 ## 1. Executive Summary
 
-AQ is implemented as AMIT-BODHIT / PROJECT-SKILL: an execution-first AI mentor that turns an idea into a clarified goal, milestones, daily tasks, guided coding, QA review, and project completion. The repository contains a substantial React/Vite frontend and Node/Express backend, but it combines a legacy project engine with a newer V2 course engine without a stable contract between them.
+AQ is implemented as SOCRATES / PROJECT-SKILL: an execution-first AI mentor that turns an idea into a clarified goal, milestones, daily tasks, guided coding, QA review, and project completion. The repository contains a substantial React/Vite frontend and Node/Express backend, but it combines a legacy project engine with a newer V2 course engine without a stable contract between them.
 
 The application currently starts and the frontend production build succeeds, but the principal learning path is not production-ready. The highest-impact failures are V2 SQLite contract mismatches, an undeclared runtime variable in the learning controller, missing backend dependencies for dormant integrations, inconsistent frontend API paths, insufficient ownership checks, and an unauthenticated project preview. The terminal is a real host PTY rather than a sandbox, so it is a critical security and deployment risk.
 

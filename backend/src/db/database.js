@@ -5,7 +5,7 @@ const path = require('path');
 const fs   = require('fs');
 const config = require('../config');
 
-const DB_PATH = config.DB_PATH || './data/amitbodhit.db';
+const DB_PATH = config.DB_PATH || './data/socrates.db';
 const dir = path.dirname(DB_PATH);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -831,7 +831,7 @@ console.log('[DB] Citizen role tables ready');
 // ─── Ensure Anonymous Citizen User Exists ───────────────────────────────────
 db.prepare(`
   INSERT OR IGNORE INTO users (id, email, name, role)
-  VALUES ('anon_citizen', 'citizen@amitbodhit.local', 'Anonymous Citizen', 'citizen')
+  VALUES ('anon_citizen', 'citizen@socrates.local', 'Anonymous Citizen', 'citizen')
 `).run();
 
 module.exports = db;

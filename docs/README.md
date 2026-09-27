@@ -1,4 +1,4 @@
-# 🚀 PROJECT-SKILL (AMIT-BODHIT)
+# 🚀 PROJECT-SKILL (SOCRATES)
 
 🧠 **AI-Powered Project Building & Civic Innovation Mentor System**  
 *(Not Just Another ChatGPT — A Real-World Project Builder & Problem Solver)*
@@ -23,7 +23,7 @@ Most students, developers, and civic problem-solvers face major bottlenecks:
 
 ## 💡 Our Solution: Dual-Pipeline Execution
 
-**PROJECT-SKILL (AMIT-BODHIT)** is an execution-driven AI mentor and civic innovation hub that doesn't let you quit.
+**PROJECT-SKILL (SOCRATES)** is an execution-driven AI mentor and civic innovation hub that doesn't let you quit.
 
 ```
 Pipeline A (Student Direct):
