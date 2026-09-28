@@ -34,6 +34,9 @@ import ProjectRequirementsPage from './pages/ProjectRequirementsPage';
 import ProjectImpactPage from './pages/ProjectImpactPage';
 import CitizenDashboardPage from './pages/CitizenDashboardPage';
 
+// Labour-Market Intelligence & Competency Alignment
+import LabourMarketPage from './pages/LabourMarketPage';
+
 function Header() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -92,6 +95,8 @@ function Header() {
               <button onClick={() => navigate('/admin')} style={navBtn('Admin', '/admin')}>Platform Admin</button>
             </>
           )}
+          {/* Labour-Market Intelligence & Competency Alignment — visible to all */}
+          <button onClick={() => navigate('/labour-intelligence')} style={navBtn('📊 Labour Intelligence', '/labour-intelligence')}>📊 Labour Intelligence</button>
         </div>
       )}
 
@@ -305,6 +310,9 @@ function AppInner() {
         <Route path="/projects/:id/team" element={<ProtectedRoute><ProjectTeamPage /></ProtectedRoute>} />
         <Route path="/projects/:id/requirements" element={<ProtectedRoute><ProjectRequirementsPage /></ProtectedRoute>} />
         <Route path="/projects/:id/impact" element={<ProtectedRoute><ProjectImpactPage /></ProtectedRoute>} />
+
+        {/* ── Labour-Market Intelligence & Competency Alignment ─────── */}
+        <Route path="/labour-intelligence" element={<ProtectedRoute><LabourMarketPage /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Routes>

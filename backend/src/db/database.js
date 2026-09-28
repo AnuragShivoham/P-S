@@ -834,5 +834,22 @@ db.prepare(`
   VALUES ('anon_citizen', 'citizen@socrates.local', 'Anonymous Citizen', 'citizen')
 `).run();
 
-module.exports = db;
+// ══════════════════════════════════════════════════════════════════════
+// Labour-Market Intelligence & Competency Alignment Schema
+// ══════════════════════════════════════════════════════════════════════
+const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, email, name, role, skill_level) VALUES (?, ?, ?, ?, ?)');
+const personas = [
+  ['demo_student', 'student@socrates.local', 'Alex Johnson', 'student', 'intermediate'],
+  ['demo_mentor', 'mentor@socrates.local', 'Prof. Sarah Williams', 'mentor', 'advanced'],
+  ['demo_employer', 'employer@socrates.local', 'Microsoft Hiring Team', 'employer', 'advanced'],
+  ['demo_expert', 'expert@socrates.local', 'Dr. Elena Vance (Industry Expert)', 'expert', 'advanced'],
+  ['demo_institution', 'institution@socrates.local', 'Engineering Academic Board', 'institution', 'advanced']
+];
+personas.forEach(p => insertUser.run(...p));
 
+const { initLabourSchema } = require('./labour_schema');
+initLabourSchema(db);
+
+console.log('[DB] Labour-Market Intelligence schema & demo personas ready');
+
+module.exports = db;

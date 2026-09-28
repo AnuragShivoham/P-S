@@ -35,11 +35,16 @@ app.use('/api/v1/preview', previewRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/media', mediaRouter);
 
+const labourRouter = require('./routes/labourIntelligence');
+
 // Societal Problems Feature Mount (with feature-toggle kill switch)
 if (process.env.ENABLE_SOCIETAL_PROBLEMS !== 'false') {
   app.use('/api/v1/problems', optionalAuth, problemsRouter);
   app.use('/api/v1/projects', authMiddleware, projectExtensionsRouter);
 }
+
+// Labour-Market Intelligence & Competency Alignment Feature Mount
+app.use('/api/v1/labour', optionalAuth, labourRouter);
 
 app.use('/api/v1/fs', authMiddleware, fsRouter);
 app.use('/api/v1', authMiddleware, apiRouter);

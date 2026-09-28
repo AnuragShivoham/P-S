@@ -194,5 +194,39 @@ export const api = {
   // Media APIs
   uploadMedia: (data) => post('/media/upload', data),
   getSignedUploadUrl: (data) => post('/media/signed-url', data),
+
+  // Labour-Market Intelligence & Competency Alignment APIs
+  ingestLabourSignal: (data) => post('/labour/signals/ingest', data),
+  getLabourSignals: () => get('/labour/signals'),
+  getLabourSignal: (id) => get(`/labour/signals/${id}`),
+  getSkillsOntology: () => get('/labour/ontology/skills'),
+  getRolesOntology: () => get('/labour/ontology/roles'),
+  normalizeSkillText: (raw_text) => post('/labour/ontology/normalize', { raw_text }),
+  getLabourRequirements: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/requirements?${qs}` : '/labour/requirements');
+  },
+  submitRequirementReview: (id, data) => post(`/labour/requirements/${id}/review`, data),
+  getStudentEvidence: (id) => get(`/labour/students/${id}/evidence`),
+  evaluateStudentGap: (id, data) => post(`/labour/students/${id}/gap-analysis`, data),
+  getProjectUpgradePlan: (projectId, data) => post(`/labour/projects/${projectId}/upgrade-plan`, data),
+  applyProjectUpgrade: (projectId, data) => post(`/labour/projects/${projectId}/apply-upgrade`, data),
+  getCompetencyEvidence: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/evidence?${qs}` : '/labour/evidence');
+  },
+  recordCompetencyEvidence: (data) => post('/labour/evidence/record', data),
+  getEmployerCandidates: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/employer/candidates?${qs}` : '/labour/employer/candidates');
+  },
+  submitEmployerFeedback: (data) => post('/labour/employer/feedback', data),
+  getInstitutionCurriculumAnalysis: () => get('/labour/institution/curriculum-analysis')
 };
 
