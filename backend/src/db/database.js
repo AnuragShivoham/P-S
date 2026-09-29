@@ -5,7 +5,7 @@ const path = require('path');
 const fs   = require('fs');
 const config = require('../config');
 
-const DB_PATH = config.DB_PATH || './data/amitbodhit.db';
+const DB_PATH = config.DB_PATH || './data/socrates.db';
 const dir = path.dirname(DB_PATH);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -340,6 +340,31 @@ if (!cols.includes('tech_stack')) {
   db.exec("ALTER TABLE users ADD COLUMN tech_stack TEXT DEFAULT '[]'");
   console.log('[DB] Migrated: added tech_stack to users');
 }
+// ─── Onboarding metadata migrations ──────────────────────────────────────────
+if (!cols.includes('onboarded')) {
+  db.exec("ALTER TABLE users ADD COLUMN onboarded INTEGER DEFAULT 0");
+  console.log('[DB] Migrated: added onboarded to users');
+}
+if (!cols.includes('use_case')) {
+  db.exec("ALTER TABLE users ADD COLUMN use_case TEXT");
+  console.log('[DB] Migrated: added use_case to users');
+}
+if (!cols.includes('profession')) {
+  db.exec("ALTER TABLE users ADD COLUMN profession TEXT");
+  console.log('[DB] Migrated: added profession to users');
+}
+if (!cols.includes('team_size')) {
+  db.exec("ALTER TABLE users ADD COLUMN team_size TEXT");
+  console.log('[DB] Migrated: added team_size to users');
+}
+if (!cols.includes('primary_goals')) {
+  db.exec("ALTER TABLE users ADD COLUMN primary_goals TEXT DEFAULT '[]'");
+  console.log('[DB] Migrated: added primary_goals to users');
+}
+if (!cols.includes('referral_source')) {
+  db.exec("ALTER TABLE users ADD COLUMN referral_source TEXT");
+  console.log('[DB] Migrated: added referral_source to users');
+}
 
 const projInfo = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
 if (!projInfo.includes('is_course')) {
@@ -456,6 +481,7 @@ const courseInfo = db.prepare("PRAGMA table_info(courses)").all().map(c => c.nam
 if (!courseInfo.includes('creator_id'))      db.exec("ALTER TABLE courses ADD COLUMN creator_id TEXT REFERENCES users(id)");
 if (!courseInfo.includes('learning_outcome')) db.exec("ALTER TABLE courses ADD COLUMN learning_outcome TEXT");
 if (!courseInfo.includes('status'))          db.exec("ALTER TABLE courses ADD COLUMN status TEXT DEFAULT 'draft'");
+if (!courseInfo.includes('problem_id'))       db.exec("ALTER TABLE courses ADD COLUMN problem_id TEXT REFERENCES societal_problems(id)");
 
 const cmInfo2 = db.prepare("PRAGMA table_info(course_milestones)").all().map(c => c.name);
 if (!cmInfo2.includes('description'))  db.exec("ALTER TABLE course_milestones ADD COLUMN description TEXT");
@@ -485,10 +511,345 @@ if (!hintInfo.includes('level')) db.exec("ALTER TABLE hint_requests ADD COLUMN l
 if (!hintInfo.includes('hint_text')) db.exec("ALTER TABLE hint_requests ADD COLUMN hint_text TEXT NOT NULL DEFAULT ''");
 
 const progressInfo = db.prepare("PRAGMA table_info(course_progress)").all().map(c => c.name);
-if (!progressInfo.includes('completed_at')) db.exec("ALTER TABLE course_progress ADD COLUMN completed_at DATETIME");
-if (!progressInfo.includes('last_help_request')) db.exec("ALTER TABLE course_progress ADD COLUMN last_help_request DATETIME");
-if (!progressInfo.includes('failure_consistency')) db.exec("ALTER TABLE course_progress ADD COLUMN failure_consistency INTEGER DEFAULT 0");
-if (!progressInfo.includes('last_error_hash')) db.exec("ALTER TABLE course_progress ADD COLUMN last_error_hash TEXT");
-if (!progressInfo.includes('interventions_count')) db.exec("ALTER TABLE course_progress ADD COLUMN interventions_count INTEGER DEFAULT 0");
+// [SOCIETAL PROBLEMS & SOLUTION PLANNING SCHEMA]
+db.exec(`
+  CREATE TABLE IF NOT EXISTS problem_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    slug TEXT NOT NULL UNIQUE,
+    icon TEXT,
+    description TEXT,
+    is_active INTEGER DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS societal_problems (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    problem_type TEXT NOT NULL,
+    category_id TEXT REFERENCES problem_categories(id),
+    status TEXT DEFAULT 'SUBMITTED',
+    urgency TEXT DEFAULT 'medium',
+    severity TEXT DEFAULT 'medium',
+    people_affected TEXT,
+    geographic_scope TEXT DEFAULT 'local',
+    privacy_level TEXT DEFAULT 'locality',
+    expected_impact TEXT,
+    structured_impact TEXT DEFAULT '{}',
+    adopted_by TEXT REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_media (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    media_type TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    storage_path TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_locations (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    latitude REAL,
+    longitude REAL,
+    formatted_address TEXT,
+    district TEXT,
+    state TEXT,
+    country TEXT DEFAULT 'India',
+    privacy_level TEXT DEFAULT 'locality',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_ai_analysis (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    summary TEXT,
+    problem_statement TEXT NOT NULL,
+    primary_category TEXT,
+    secondary_categories TEXT DEFAULT '[]',
+    affected_stakeholders TEXT DEFAULT '[]',
+    root_causes TEXT DEFAULT '[]',
+    key_requirements TEXT DEFAULT '[]',
+    constraints TEXT DEFAULT '[]',
+    urgency TEXT,
+    severity TEXT,
+    estimated_scope TEXT,
+    expected_impact TEXT,
+    potential_solution_domains TEXT DEFAULT '[]',
+    required_skills TEXT DEFAULT '[]',
+    recommended_project_type TEXT,
+    recommended_team_roles TEXT DEFAULT '[]',
+    technology_domains TEXT DEFAULT '[]',
+    confidence REAL DEFAULT 0.0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_reviews (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    reviewer_id TEXT NOT NULL REFERENCES users(id),
+    verdict TEXT NOT NULL,
+    review_notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_duplicates (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    matched_problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    similarity_score REAL NOT NULL,
+    reasoning TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS problem_interests (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role_preference TEXT,
+    note TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS project_architectures (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version INTEGER DEFAULT 1,
+    title TEXT,
+    system_overview TEXT,
+    frontend_arch TEXT,
+    backend_arch TEXT,
+    database_arch TEXT,
+    aiml_arch TEXT,
+    data_flow TEXT,
+    deployment_arch TEXT,
+    security_arch TEXT,
+    components_json TEXT DEFAULT '[]',
+    is_approved INTEGER DEFAULT 0,
+    created_by TEXT REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS project_teams (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT DEFAULT 'Solution Team',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS project_team_members (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES project_teams(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT DEFAULT 'developer',
+    assigned_task_id TEXT REFERENCES tasks(id),
+    status TEXT DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS requirements (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    problem_id TEXT REFERENCES societal_problems(id),
+    source_type TEXT DEFAULT 'problem_statement',
+    title TEXT NOT NULL,
+    description TEXT,
+    priority TEXT DEFAULT 'must',
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS requirement_tasks (
+    id TEXT PRIMARY KEY,
+    requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS requirement_qa (
+    id TEXT PRIMARY KEY,
+    requirement_id TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+    qa_review_id TEXT NOT NULL REFERENCES qa_reviews(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    score REAL DEFAULT 0,
+    evidence_text TEXT,
+    missing_pieces_text TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS collaboration_sessions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    host_id TEXT NOT NULL REFERENCES users(id),
+    task_id TEXT REFERENCES tasks(id),
+    title TEXT,
+    status TEXT DEFAULT 'active',
+    live_share_url TEXT,
+    permission_mode TEXT DEFAULT 'full',
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS collaboration_participants (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES collaboration_sessions(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT DEFAULT 'participant',
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    left_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS impact_metrics (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    metric_type TEXT NOT NULL,
+    label TEXT NOT NULL,
+    unit TEXT,
+    estimated_value REAL,
+    measured_value REAL,
+    evidence_notes TEXT,
+    deployment_status TEXT DEFAULT 'planned',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// ─── Societal Problem Column Migrations ─────────────────────────────────────
+const pCols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
+if (!pCols.includes('problem_id')) {
+  db.exec("ALTER TABLE projects ADD COLUMN problem_id TEXT REFERENCES societal_problems(id)");
+  console.log('[DB] Migrated: added problem_id to projects');
+}
+if (!pCols.includes('architecture_version')) {
+  db.exec("ALTER TABLE projects ADD COLUMN architecture_version INTEGER DEFAULT 1");
+  console.log('[DB] Migrated: added architecture_version to projects');
+}
+
+// ─── Seed Default Problem Categories ────────────────────────────────────────
+const catCount = db.prepare("SELECT COUNT(*) as count FROM problem_categories").get().count;
+if (catCount === 0) {
+  const insertCat = db.prepare(`
+    INSERT OR IGNORE INTO problem_categories (id, name, slug, icon, description)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const defaultCats = [
+    ['cat_water', 'Water & Sanitation', 'water-sanitation', 'Droplets', 'Clean water supply, drinking water contamination, drainage, and sewage management.'],
+    ['cat_health', 'Healthcare & Hygiene', 'healthcare', 'HeartPulse', 'Public health clinics, disease surveillance, medical supply distribution, and community wellbeing.'],
+    ['cat_edu', 'Education & Literacy', 'education', 'GraduationCap', 'School infrastructure, digital learning access, dropout reduction, and vocational training.'],
+    ['cat_agri', 'Agriculture & Food', 'agriculture', 'Sprout', 'Crop health, smart irrigation, farmer market linkages, storage, and food security.'],
+    ['cat_env', 'Environment & Climate', 'environment', 'Trees', 'Pollution tracking, renewable energy, waste management, and conservation.'],
+    ['cat_access', 'Accessibility & Inclusion', 'accessibility', 'Accessibility', 'Assistive technologies, public accessibility for disabled persons, and inclusive services.'],
+    ['cat_infra', 'Public Infrastructure', 'public-infrastructure', 'Building2', 'Roads, bridges, public transit, street lighting, and utility reliability.'],
+    ['cat_rural', 'Rural Development', 'rural-development', 'Home', 'Last-mile electrification, village governance, rural livelihoods, and connectivity.'],
+    ['cat_urban', 'Urban Governance & Safety', 'urban-governance', 'Shield', 'Traffic congestion, emergency response, municipal grievance redressal, and civic safety.'],
+    ['cat_other', 'Other Societal Needs', 'other', 'HelpCircle', 'Cross-cutting community and civic problems requiring technological innovation.']
+  ];
+  for (const [id, name, slug, icon, desc] of defaultCats) {
+    insertCat.run(id, name, slug, icon, desc);
+  }
+  console.log('[DB] Seeded default problem categories');
+}
+
+// ─── Citizen Role & Workflow Tables ─────────────────────────────────────────
+db.exec(`
+  -- AI-suggested categories for problems (separate from canonical problem_categories)
+  -- Supports human-reviewed, auditable AI categorisation workflow.
+  CREATE TABLE IF NOT EXISTS problem_ai_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    category_id TEXT REFERENCES problem_categories(id),
+    suggested_category TEXT NOT NULL,
+    confidence REAL,
+    rank INTEGER,
+    model TEXT,
+    prompt_version TEXT,
+    status TEXT DEFAULT 'PENDING',
+    reasoning TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at DATETIME,
+    reviewed_by TEXT REFERENCES users(id)
+  );
+
+  -- Tracks mentor/university adoptions of societal problems.
+  -- Separate from projects; adoption does NOT auto-create a project.
+  CREATE TABLE IF NOT EXISTS problem_adoptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Access policies for projects spawned from societal problems.
+  CREATE TABLE IF NOT EXISTS project_access_policies (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    access_mode TEXT NOT NULL,
+    institution_id TEXT,
+    course_id TEXT,
+    approval_required INTEGER DEFAULT 0,
+    max_team_size INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Student applications to join a problem-derived project.
+  CREATE TABLE IF NOT EXISTS project_student_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    student_id TEXT NOT NULL REFERENCES users(id),
+    status TEXT DEFAULT 'pending',
+    message TEXT,
+    reviewed_by TEXT REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at DATETIME
+  );
+`);
+
+// ─── Column migrations for new tables (idempotent) ───────────────────────────
+const adoptionInfo = db.prepare('PRAGMA table_info(problem_adoptions)').all().map(c => c.name);
+if (!adoptionInfo.includes('role')) {
+  // Table was created without role column (very old schema); add it.
+  db.exec("ALTER TABLE problem_adoptions ADD COLUMN role TEXT NOT NULL DEFAULT 'mentor'");
+  console.log('[DB] Migrated: added role to problem_adoptions');
+}
+
+const policyInfo = db.prepare('PRAGMA table_info(project_access_policies)').all().map(c => c.name);
+if (!policyInfo.includes('max_team_size')) {
+  db.exec('ALTER TABLE project_access_policies ADD COLUMN max_team_size INTEGER');
+  console.log('[DB] Migrated: added max_team_size to project_access_policies');
+}
+
+console.log('[DB] Citizen role tables ready');
+
+// ─── Ensure Anonymous Citizen User Exists ───────────────────────────────────
+db.prepare(`
+  INSERT OR IGNORE INTO users (id, email, name, role)
+  VALUES ('anon_citizen', 'citizen@socrates.local', 'Anonymous Citizen', 'citizen')
+`).run();
+
+// ══════════════════════════════════════════════════════════════════════
+// Labour-Market Intelligence & Competency Alignment Schema
+// ══════════════════════════════════════════════════════════════════════
+const insertUser = db.prepare('INSERT OR IGNORE INTO users (id, email, name, role, skill_level) VALUES (?, ?, ?, ?, ?)');
+const personas = [
+  ['demo_student', 'student@socrates.local', 'Alex Johnson', 'student', 'intermediate'],
+  ['demo_mentor', 'mentor@socrates.local', 'Prof. Sarah Williams', 'mentor', 'advanced'],
+  ['demo_employer', 'employer@socrates.local', 'Microsoft Hiring Team', 'employer', 'advanced'],
+  ['demo_expert', 'expert@socrates.local', 'Dr. Elena Vance (Industry Expert)', 'expert', 'advanced'],
+  ['demo_institution', 'institution@socrates.local', 'Engineering Academic Board', 'institution', 'advanced']
+];
+personas.forEach(p => insertUser.run(...p));
+
+const { initLabourSchema } = require('./labour_schema');
+initLabourSchema(db);
+
+console.log('[DB] Labour-Market Intelligence schema & demo personas ready');
 
 module.exports = db;

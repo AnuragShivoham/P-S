@@ -15,7 +15,7 @@ export default function PlanConfirmationPage() {
 
   if (!tempMilestones || !project) {
     return (
-      <div className="goal-pg" style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+      <div className="goal-pg" style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 52px)' }}>
         <p style={{ color: '#8b949e' }}>No plan found to confirm. Please start from the goal page.</p>
         <button className="btn-p" onClick={() => navigate('/goal')}>Go to Goal Page</button>
       </div>

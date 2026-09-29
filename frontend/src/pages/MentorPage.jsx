@@ -476,7 +476,7 @@ const styles = {
     loadingScreen: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0d1117', color: '#8b949e', gap: 12, fontFamily: 'var(--sans)' },
 
     // Queue Page
-    queuePage: { display: 'flex', flexDirection: 'column', height: '100vh', background: '#0d1117', color: '#c9d1d9', fontFamily: 'var(--sans)' },
+    queuePage: { display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 52px)', background: '#0d1117', color: '#c9d1d9', fontFamily: 'var(--sans)' },
     queueTopBar: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 24px', background: '#010409', borderBottom: '1px solid #21262d' },
     panelTitle: { fontWeight: 800, fontSize: 14, color: '#e6edf3', letterSpacing: '0.05em' },
     refreshBtn: { background: 'transparent', border: '1px solid #30363d', color: '#8b949e', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
@@ -518,7 +518,7 @@ const styles = {
     previewEmpty: { color: '#484f58', fontSize: 13, textAlign: 'center', padding: 40 },
 
     // Session Page
-    sessionPage: { display: 'flex', flexDirection: 'column', height: '100vh', background: '#0d1117', color: '#c9d1d9', fontFamily: 'var(--sans)' },
+    sessionPage: { display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 52px)', background: '#0d1117', color: '#c9d1d9', fontFamily: 'var(--sans)' },
     sessionTopBar: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 24px', background: '#010409', borderBottom: '1px solid #21262d' },
     leaveBtn: { background: 'transparent', border: '1px solid #30363d', color: '#8b949e', borderRadius: 4, padding: '6px 12px', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
     separator: { width: 1, height: 20, background: '#30363d' },

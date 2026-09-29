@@ -25,7 +25,8 @@ function upsertUser(email, name, extra = {}) {
   let user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
   
   // Security Check: Only allow admin role if email is in whitelist
-  let targetRole = extra.role || 'student';
+  const ALLOWED_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
+  let targetRole = ALLOWED_ROLES.includes(extra.role) ? extra.role : 'student';
   if (targetRole === 'admin') {
     const isAdmin = config.ADMIN_EMAILS.includes(normalizedEmail);
     if (!isAdmin) {
@@ -43,7 +44,8 @@ function upsertUser(email, name, extra = {}) {
     // Always update role if explicitly provided at login (supports role switching)
     const updates = [];
     const params = [];
-    if (extra.role && ['student', 'mentor', 'admin'].includes(extra.role)) {
+    const ALLOWED_SWITCHABLE_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
+    if (extra.role && ALLOWED_SWITCHABLE_ROLES.includes(extra.role)) {
       // Check permission for switching to admin
       if (extra.role === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
         console.warn(`[Auth Security] User ${normalizedEmail} blocked from switching to ADMIN`);
@@ -80,13 +82,23 @@ function getTransporter() {
 
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
 router.post('/send-otp', wrap(async (req, res) => {
-  const { email } = req.body;
+  const { email, action } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Valid email required' });
   }
 
+  const normalizedEmail = email.toLowerCase();
+  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+
+  if (action === 'login' && !userExists) {
+    return res.status(404).json({ error: 'Account not found. Please sign up first.' });
+  }
+  if (action === 'signup' && userExists) {
+    return res.status(409).json({ error: 'Account already exists. Please log in.' });
+  }
+
   let otp = String(Math.floor(100000 + Math.random() * 900000));
-  if (email.toLowerCase() === 'test@example.com') {
+  if (normalizedEmail === 'test@example.com') {
     otp = '123456';
   }
   
@@ -100,10 +112,10 @@ router.post('/send-otp', wrap(async (req, res) => {
     await transporter.sendMail({
       from: config.EMAIL_FROM,
       to: email,
-      subject: 'Your AMIT-BODHIT login code',
+      subject: 'Your SOCRATES login code',
       html: `
         <div style="font-family:monospace;background:#0d0d0d;color:#e6edf3;padding:32px;border-radius:12px;max-width:480px">
-          <h2 style="color:#58a6ff;margin:0 0 8px">AMIT-BODHIT</h2>
+          <h2 style="color:#58a6ff;margin:0 0 8px">SOCRATES</h2>
           <p style="color:#8b949e;margin:0 0 24px">Your one-time login code:</p>
           <div style="font-size:36px;font-weight:900;letter-spacing:10px;color:#3fb950;margin-bottom:24px">${otp}</div>
           <p style="color:#8b949e;font-size:12px">Expires in 10 minutes. Do not share this code.</p>
@@ -128,15 +140,23 @@ function hydrateUser(user) {
   try {
     user.tech_stack = typeof user.tech_stack === 'string' ? JSON.parse(user.tech_stack || '[]') : (user.tech_stack || []);
   } catch(e) { user.tech_stack = []; }
+  try {
+    user.primary_goals = typeof user.primary_goals === 'string' ? JSON.parse(user.primary_goals || '[]') : (user.primary_goals || []);
+  } catch(e) { user.primary_goals = []; }
+  user.onboarded = user.onboarded === 1 || user.onboarded === true;
   return user;
 }
 
 // ─── POST /auth/verify-otp ────────────────────────────────────────────────────
 router.post('/verify-otp', wrap(async (req, res) => {
-  const { email, otp, name, role } = req.body;
+  const { email, otp, name, role, action } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
+  const ALLOWED_OTP_ROLES = ['student', 'mentor', 'citizen', 'university'];
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
+  }
+  if (role && !ALLOWED_OTP_ROLES.includes(role)) {
+    return res.status(400).json({ error: 'Invalid role specified.' });
   }
 
   const now = new Date().toISOString();
@@ -149,7 +169,17 @@ router.post('/verify-otp', wrap(async (req, res) => {
   // Mark used
   db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
 
-  const rawUser = upsertUser(email.toLowerCase(), name || email.split('@')[0], { role });
+  const normalizedEmail = email.toLowerCase();
+  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+
+  if (action === 'login' && !userExists) {
+    return res.status(404).json({ error: 'Account not found. Please sign up first.' });
+  }
+  if (action === 'signup' && userExists) {
+    return res.status(409).json({ error: 'Account already exists. Please log in.' });
+  }
+
+  const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { role });
   
   if (role === 'admin' && rawUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access Denied: Your email is not authorized for Admin access.' });
@@ -247,6 +277,13 @@ router.post('/google', wrap(async (req, res) => {
 
   // Consistently lowercase email to prevent SQLite UNIQUE collisions across case-sensitivity boundaries
   const normalizedEmail = email.toLowerCase();
+  
+  // Check if user exists for Google login (only allow login, not signup)
+  let userRecord = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  if (!userRecord) {
+    return res.status(401).json({ error: 'Account not found. Please sign up first.' });
+  }
+
   const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { google_id, avatar, role });
   
   if (role === 'admin' && rawUser.role !== 'admin') {
@@ -296,6 +333,48 @@ router.get('/me', wrap(async (req, res) => {
   } catch (e) {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
+}));
+
+// ─── POST /auth/onboard ──────────────────────────────────────────────────────
+// Called after signup/login to persist onboarding survey answers.
+// Admins and mentors are excluded — they bypass onboarding entirely.
+router.post('/onboard', wrap(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Authorization required' });
+
+  const token = authHeader.replace('Bearer ', '');
+  let payload;
+  try { payload = jwt.verify(token, config.JWT_SECRET); }
+  catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
+
+  // Admins and mentors don't do onboarding
+  if (payload.role === 'admin' || payload.role === 'mentor') {
+    return res.status(403).json({ error: 'Onboarding does not apply to admin or mentor accounts.' });
+  }
+
+  const { use_case, profession, team_size, primary_goals, referral_source } = req.body;
+
+  db.prepare(`
+    UPDATE users SET
+      onboarded = 1,
+      use_case = ?,
+      profession = ?,
+      team_size = ?,
+      primary_goals = ?,
+      referral_source = ?
+    WHERE id = ?
+  `).run(
+    use_case || null,
+    profession || null,
+    team_size || null,
+    JSON.stringify(primary_goals || []),
+    referral_source || null,
+    payload.id
+  );
+
+  const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id));
+  const newToken = signToken(user);
+  res.json({ success: true, token: newToken, user });
 }));
 
 module.exports = router;

@@ -49,7 +49,7 @@ const checkIsDir = (node) => {
 // FileSystem Handle Persistence via IndexedDB
 const idbSetHandle = async (handle) => {
     return new Promise((resolve) => {
-        const req = indexedDB.open('AmitBodhitIDE', 1);
+        const req = indexedDB.open('SocratesIDE', 1);
         req.onupgradeneeded = () => req.result.createObjectStore('handles');
         req.onsuccess = () => {
             try {
@@ -61,18 +61,31 @@ const idbSetHandle = async (handle) => {
     });
 };
 const idbGetHandle = async () => {
-    return new Promise((resolve) => {
-        const req = indexedDB.open('AmitBodhitIDE', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('handles');
-        req.onsuccess = () => {
-            try {
-                if (!req.result.objectStoreNames.contains('handles')) return resolve(null);
-                const tx = req.result.transaction('handles', 'readonly');
-                const getReq = tx.objectStore('handles').get('localSyncHandle');
-                getReq.onsuccess = () => resolve(getReq.result || null);
-            } catch (e) { resolve(null); }
-        };
+    const fetchFromDb = (dbName) => new Promise((resolve) => {
+        try {
+            const req = indexedDB.open(dbName, 1);
+            req.onupgradeneeded = () => req.result.createObjectStore('handles');
+            req.onsuccess = () => {
+                try {
+                    if (!req.result.objectStoreNames.contains('handles')) return resolve(null);
+                    const tx = req.result.transaction('handles', 'readonly');
+                    const getReq = tx.objectStore('handles').get('localSyncHandle');
+                    getReq.onsuccess = () => resolve(getReq.result || null);
+                    getReq.onerror = () => resolve(null);
+                } catch (e) { resolve(null); }
+            };
+            req.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
     });
+
+    let handle = await fetchFromDb('SocratesIDE');
+    if (!handle) {
+        handle = await fetchFromDb('AmitBodhitIDE');
+        if (handle) {
+            await idbSetHandle(handle);
+        }
+    }
+    return handle;
 };
 const verifyHandlePermission = async (handle) => {
     if (!handle) return false;
@@ -80,6 +93,30 @@ const verifyHandlePermission = async (handle) => {
     if ((await handle.queryPermission(opts)) === 'granted') return true;
     if ((await handle.requestPermission(opts)) === 'granted') return true;
     return false;
+};
+
+const normalizePath = (p) => {
+    if (!p || p === '/') return '/';
+    const clean = p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+    return clean.startsWith('/') ? clean : '/' + clean;
+};
+
+const scanLocalDirectory = async (dirHandle, pathPrefix = '') => {
+    const found = new Set();
+    if (!dirHandle) return found;
+    try {
+        for await (const [name, handle] of dirHandle.entries()) {
+            const itemPath = normalizePath(pathPrefix ? `${pathPrefix}/${name}` : `/${name}`);
+            found.add(itemPath);
+            if (handle.kind === 'directory') {
+                const sub = await scanLocalDirectory(handle, itemPath);
+                for (const p of sub) found.add(p);
+            }
+        }
+    } catch (e) {
+        console.warn('[Sync] scanLocalDirectory error:', e);
+    }
+    return found;
 };
 
 // ─── CONTEXT MENU ─────────────────────────────────────────────────────────────
@@ -358,6 +395,9 @@ export default function IDE() {
     const [gitPushing, setGitPushing] = useState(false);
     const [localSyncHandle, setLocalSyncHandle] = useState(null);
     const syncDropdownRef = useRef(null);
+    const knownLocalFilesRef = useRef(new Set());
+    const isCreatingRef = useRef(false);
+    const isReconcilingRef = useRef(false);
 
     // Refs
     const termRef = useRef(null);
@@ -433,48 +473,60 @@ export default function IDE() {
     };
 
     const reconcileLocalChanges = useCallback(async () => {
-        if (!localSyncHandle || !fsTree.length || !autoSyncEnabled) return;
+        if (!localSyncHandle || !autoSyncEnabled || isCreatingRef.current || isReconcilingRef.current || !project?.id) return;
         
-        // Ensure we have permission
-        const opts = { mode: 'readwrite' };
-        if ((await localSyncHandle.queryPermission(opts)) !== 'granted') return;
+        try {
+            // Ensure we have permission
+            const opts = { mode: 'readwrite' };
+            if ((await localSyncHandle.queryPermission(opts)) !== 'granted') return;
 
-        let deletedCount = 0;
-        const checkNode = async (nodes, dirHandle) => {
-            for (const node of nodes) {
-                try {
-                    const name = node.name;
-                    if (node.children) {
-                        const sub = await dirHandle.getDirectoryHandle(name);
-                        await checkNode(node.children, sub);
-                    } else {
-                        await dirHandle.getFileHandle(name);
-                    }
-                } catch (e) {
-                    if (e.name === 'NotFoundError') {
-                        await api.deleteFile(node.path, project.id);
+            isReconcilingRef.current = true;
+
+            // First-time scan if knownLocalFiles is empty: populate with current files on disk
+            if (knownLocalFilesRef.current.size === 0) {
+                const initialPaths = await scanLocalDirectory(localSyncHandle);
+                initialPaths.forEach(p => knownLocalFilesRef.current.add(p));
+                return;
+            }
+
+            // Scan what actually exists locally right now
+            const currentLocalPaths = await scanLocalDirectory(localSyncHandle);
+
+            // Only delete files from cloud if they were PREVIOUSLY known locally, but are now missing locally
+            let deletedCount = 0;
+            const knownPaths = Array.from(knownLocalFilesRef.current);
+            for (const knownPath of knownPaths) {
+                if (!currentLocalPaths.has(knownPath)) {
+                    try {
+                        await api.deleteFile(knownPath, project.id);
                         deletedCount++;
+                    } catch (e) {
+                        // File may already be deleted or not found
                     }
+                    knownLocalFilesRef.current.delete(knownPath);
                 }
             }
-        };
 
-        try {
-            await checkNode(fsTree, localSyncHandle);
+            // Update knownLocalFiles to current local state
+            currentLocalPaths.forEach(p => knownLocalFilesRef.current.add(p));
+
             if (deletedCount > 0) {
                 status(`Local deletion detected. Synced ${deletedCount} item(s) to cloud.`);
-                // We don't call loadFsTree() here to avoid infinite loops, but we trust the backend deletion will refresh correctly next time
+                const res = await api.getFsTree(project.id);
+                setFsTree(res.tree || []);
             }
-        } catch (e) {}
-    }, [localSyncHandle, fsTree, autoSyncEnabled, project?.id]);
+        } catch (e) {
+            console.error('[Reconcile Error]', e);
+        } finally {
+            isReconcilingRef.current = false;
+        }
+    }, [localSyncHandle, autoSyncEnabled, project?.id]);
 
     const loadFsTree = useCallback(async () => {
         if (!project?.id) return;
         try {
             const res = await api.getFsTree(project.id);
             setFsTree(res.tree || []);
-            // Run reconciliation when user manually refreshes
-            reconcileLocalChanges(); 
 
             // Also load intelligence data
             setLoadingIntel(true);
@@ -495,7 +547,14 @@ export default function IDE() {
             status('Sync Error: ' + e.message, true);
             setLoadingIntel(false);
         }
-    }, [project?.id, currentTask?.id, reconcileLocalChanges, setAuth, project]);
+    }, [project?.id, currentTask?.id, setAuth, project]);
+
+    const handleManualRefresh = async () => {
+        await loadFsTree();
+        if (autoSyncEnabled && localSyncHandle) {
+            reconcileLocalChanges();
+        }
+    };
 
     const loadMentorChat = useCallback(async () => {
         if (!project?.id) return;
@@ -538,6 +597,8 @@ export default function IDE() {
                         setLocalSyncHandle(handle);
                         setLocalSyncPath(handle.name);
                         setAutoSyncEnabled(true);
+                        const paths = await scanLocalDirectory(handle);
+                        paths.forEach(p => knownLocalFilesRef.current.add(p));
                     }
                 }
             } catch (e) { console.error('[IDB] Revive failed', e); }
@@ -600,9 +661,11 @@ export default function IDE() {
         }
     };
 
-    const writeToLocalDir = async (dirHandle, filePath, content) => {
+    const writeToLocalDir = async (dirHandle, filePath, content = '') => {
+        if (!dirHandle) return false;
         try {
-            const parts = filePath.split('/').filter(p => p);
+            const parts = filePath.replace(/\\/g, '/').split('/').filter(p => p);
+            if (!parts.length) return false;
             let current = dirHandle;
             for (let i = 0; i < parts.length - 1; i++) {
                 current = await current.getDirectoryHandle(parts[i], { create: true });
@@ -611,9 +674,27 @@ export default function IDE() {
             const writable = await fileHandle.createWritable();
             await writable.write(content);
             await writable.close();
+            knownLocalFilesRef.current.add(normalizePath(filePath));
             return true;
         } catch (err) {
             console.error('[Sync] Error', err);
+            return false;
+        }
+    };
+
+    const createLocalDir = async (dirHandle, dirPath) => {
+        if (!dirHandle) return false;
+        try {
+            const parts = dirPath.replace(/\\/g, '/').split('/').filter(p => p);
+            if (!parts.length) return false;
+            let current = dirHandle;
+            for (let i = 0; i < parts.length; i++) {
+                current = await current.getDirectoryHandle(parts[i], { create: true });
+            }
+            knownLocalFilesRef.current.add(normalizePath(dirPath));
+            return true;
+        } catch (err) {
+            console.error('[Sync] Error creating dir', err);
             return false;
         }
     };
@@ -678,6 +759,9 @@ export default function IDE() {
                 await idbSetHandle(handle);
                 setLocalSyncPath(handle.name);
                 setAutoSyncEnabled(true);
+                knownLocalFilesRef.current.clear();
+                const paths = await scanLocalDirectory(handle);
+                paths.forEach(p => knownLocalFilesRef.current.add(p));
                 await writeToLocalDir(handle, pendingSyncFile.path, pendingSyncFile.content);
                 status('Saved & Synced ' + pendingSyncFile.path.split('/').pop());
             } catch (err) {
@@ -715,6 +799,9 @@ export default function IDE() {
             await idbSetHandle(handle);
             setLocalSyncPath(handle.name);
             setAutoSyncEnabled(true);
+            knownLocalFilesRef.current.clear();
+            const paths = await scanLocalDirectory(handle);
+            paths.forEach(p => knownLocalFilesRef.current.add(p));
             status('Sync folder set: ' + handle.name);
             setShowSyncDropdown(false);
         } catch (err) {
@@ -752,7 +839,7 @@ export default function IDE() {
             for (const file of filesToSync) {
                 const res = await api.getFile(file.path, project.id);
                 if (res?.content !== undefined) {
-                    await writeToLocalDir(localSyncHandle, file.path, res.content);
+                    await writeToLocalDir(activeHandle, file.path, res.content);
                 }
             }
             status(`Synced ${filesToSync.length} files successfully!`);
@@ -1019,25 +1106,66 @@ export default function IDE() {
         const val = modalValue.trim();
         if (!val) return;
         setModal(null);
+        isCreatingRef.current = true;
         try {
-            const path = (node?.path || '').replace(/\/+$/, '');
-            if (type === 'newFile') await api.createFile(path + '/' + val, project.id);
-            else if (type === 'newFolder') await api.createFolder(path + '/' + val, project.id);
-            else if (type === 'rename') await api.renameFile(node.path, node.path.substring(0, node.path.lastIndexOf('/')) + '/' + val, project.id);
-            else if (type === 'gitClone') await api.gitClone(val, path, project.id);
-            else if (type === 'runCustomCmd') {
+            const parentPath = (node?.path || '').replace(/\/+$/, '');
+            const targetPath = normalizePath(parentPath ? `${parentPath}/${val}` : `/${val}`);
+            
+            if (type === 'newFile') {
+                await api.createFile(targetPath, project.id);
+                if (localSyncHandle && autoSyncEnabled) {
+                    await writeToLocalDir(localSyncHandle, targetPath, '');
+                }
+                status('File created: ' + val);
+            } else if (type === 'newFolder') {
+                await api.createFolder(targetPath, project.id);
+                if (localSyncHandle && autoSyncEnabled) {
+                    await createLocalDir(localSyncHandle, targetPath);
+                }
+                status('Folder created: ' + val);
+            } else if (type === 'rename') {
+                const parentDir = node.path.includes('/') ? node.path.substring(0, node.path.lastIndexOf('/')) : '';
+                const newPath = normalizePath(parentDir ? `${parentDir}/${val}` : `/${val}`);
+                await api.renameFile(node.path, newPath, project.id);
+                knownLocalFilesRef.current.delete(normalizePath(node.path));
+                knownLocalFilesRef.current.add(newPath);
+                status('Renamed to: ' + val);
+            } else if (type === 'gitClone') {
+                await api.gitClone(val, parentPath, project.id);
+            } else if (type === 'runCustomCmd') {
                 handleRunInDir(node.path, val);
+                isCreatingRef.current = false;
                 return;
             }
-            loadFsTree();
-        } catch (e) { status(e.message, true); }
+            await loadFsTree();
+        } catch (e) { 
+            status(e.message, true); 
+        } finally {
+            isCreatingRef.current = false;
+        }
     };
 
     const confirmDelete = async () => {
         const node = deleteTarget; setDeleteTarget(null);
+        if (!node) return;
         try {
             await api.deleteFile(node.path, project.id);
-            loadFsTree();
+            const normPath = normalizePath(node.path);
+            knownLocalFilesRef.current.delete(normPath);
+            if (localSyncHandle && autoSyncEnabled) {
+                try {
+                    const parts = normPath.split('/').filter(p => p);
+                    let current = localSyncHandle;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        current = await current.getDirectoryHandle(parts[i]);
+                    }
+                    const name = parts[parts.length - 1];
+                    if (name) {
+                        await current.removeEntry(name, { recursive: true });
+                    }
+                } catch (e) {}
+            }
+            await loadFsTree();
             setOpenFiles(prev => prev.filter(f => !f.path.startsWith(node.path)));
             if (activeFile?.path && activeFile.path.startsWith(node.path)) setActiveFile(null);
         } catch (e) { status('Delete failed', true); }
@@ -1152,7 +1280,7 @@ export default function IDE() {
                     <div style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column', background: '#010409' }}>
                         <div style={{ padding: '10px 14px', borderBottom: '1px solid #21262d', fontSize: 10, fontWeight: 700, color: '#8b949e', display: 'flex', justifyContent: 'space-between' }}>
                             <span>EXPLORER</span>
-                            <button onClick={loadFsTree} style={iconBtn}><RefreshCw size={10} /></button>
+                            <button onClick={handleManualRefresh} title="Refresh & Sync" style={iconBtn}><RefreshCw size={10} /></button>
                         </div>
                         <div style={{ flex: 1, overflowY: 'auto' }}>
                             {fsTree.map(node => (
@@ -1251,7 +1379,7 @@ export default function IDE() {
                                         {((chatMode === 'AI') ? chatLog : mentorChatLog).map((m, i) => (
                                             <div key={i} style={{ marginBottom: 16 }}>
                                                 <div style={{ fontSize: 9, fontWeight: 800, color: '#8b949e', marginBottom: 4 }}>
-                                                    {m.role === 'user' ? 'YOU' : (chatMode === 'AI' ? 'AMIT-BODHIT' : (m.userName || 'MENTOR'))}
+                                                    {m.role === 'user' ? 'YOU' : (chatMode === 'AI' ? 'SOCRATES' : (m.userName || 'MENTOR'))}
                                                 </div>
                                                 <div style={{ fontSize: 13, background: m.role === 'user' ? '#1f6feb' : '#21262d', padding: 10, borderRadius: 8 }}>
                                                     <MarkdownRenderer content={m.content} />
@@ -1333,6 +1461,9 @@ export default function IDE() {
                                             setLocalSyncHandle(storedHandle);
                                             setLocalSyncPath(storedHandle.name);
                                             setAutoSyncEnabled(true);
+                                            knownLocalFilesRef.current.clear();
+                                            const paths = await scanLocalDirectory(storedHandle);
+                                            paths.forEach(p => knownLocalFilesRef.current.add(p));
                                             if (pendingSyncFile) {
                                                 await writeToLocalDir(storedHandle, pendingSyncFile.path, pendingSyncFile.content);
                                                 status('Saved & Synced ' + pendingSyncFile.path.split('/').pop());

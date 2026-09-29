@@ -1,4 +1,4 @@
-# AMIT-BODHIT Pre-Commit Security & Stability Audit Report
+# SOCRATES Pre-Commit Security & Stability Audit Report
 
 **Date of Audit:** March 21, 2026
 **Scope:** Strict backend validation (No features, no redesign, zero external dependencies added)

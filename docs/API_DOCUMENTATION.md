@@ -1,10 +1,10 @@
-# API Documentation - PROJECT-SKILL (AMIT-BODHIT)
+# API Documentation - PROJECT-SKILL (SOCRATES)
 
 ## Base URL
 
 ```
 Development: http://localhost:3001/api/v1
-Production: https://api.amitbodhit.app/api/v1
+Production: https://api.socrates.app/api/v1
 ```
 
 ## Authentication
@@ -843,7 +843,7 @@ const response = await client.chat.send(project.id, {
 
 ### Python
 ```python
-from amit_bodhit import Client
+from socrates import Client
 
 client = Client(
     base_url='http://localhost:3001/api/v1',

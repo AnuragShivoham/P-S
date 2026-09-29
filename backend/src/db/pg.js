@@ -3,7 +3,7 @@ require('dotenv').config();
 
 // Standard PostgreSQL Scale Matrix (Eliminates localized SQLite Row Contention under extreme load)
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://user:pass@localhost:5432/amit_bodhit',
+    connectionString: process.env.DATABASE_URL || 'postgresql://user:pass@localhost:5432/socrates',
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,

@@ -1,6 +1,6 @@
 # Production Security & Hardening Analysis
 
-This is an analysis of your 10-point security mandate for transforming the AMIT-BODHIT system into a production-level Startup environment. 
+This is an analysis of your 10-point security mandate for transforming the SOCRATES system into a production-level Startup environment. 
 
 ## 1. Vulnerabilities Found in Current System
 

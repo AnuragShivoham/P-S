@@ -1,7 +1,7 @@
 const { callClaude } = require('../db/claude');
 const memoryService = require('../services/memoryService');
 
-const GUIDE_SYSTEM = `You are AMIT-BODHIT execution guide.
+const GUIDE_SYSTEM = `You are SOCRATES execution guide.
 TEACH. Do NOT solve completely.
 
 RULES:
@@ -27,9 +27,9 @@ MCP Queries are forwarded to the IDE's Terminal server directly:
 </ACTION_PLAN>`;
 
 const HINT_SYSTEMS = [
-  'AMIT-BODHIT hint level 1: Point to the concept or docs section only. Max 60 words. No code.',
-  'AMIT-BODHIT hint level 2: Show the relevant code PATTERN without full context. Max 80 words.',
-  'AMIT-BODHIT hint level 3: Show exactly which line/function needs changing and why. Max 100 words. No complete answer.',
+  'SOCRATES hint level 1: Point to the concept or docs section only. Max 60 words. No code.',
+  'SOCRATES hint level 2: Show the relevant code PATTERN without full context. Max 80 words.',
+  'SOCRATES hint level 3: Show exactly which line/function needs changing and why. Max 100 words. No complete answer.',
 ];
 
 function formatTree(nodes, indent = '') {
@@ -80,7 +80,7 @@ Commands: ${JSON.stringify(task?.commands||[])}`;
 
   const msgs = [
     { role: 'user',      content: `Task context:\n${ctx}` },
-    { role: 'assistant', content: 'Understood. I am your AMIT-BODHIT Mentor. What is your question?' },
+    { role: 'assistant', content: 'Understood. I am your SOCRATES Mentor. What is your question?' },
     ...history,
   ];
 

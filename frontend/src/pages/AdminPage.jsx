@@ -44,7 +44,7 @@ const DEFAULT_FEATURES = {
     qa_pass_score_desc: 'Minimum QA review score to pass a task (0-100)',
     max_sos_requests: 2,
     max_sos_requests_desc: 'Maximum student SOS requests per task',
-    platform_name: 'AMIT-BODHIT',
+    platform_name: 'SOCRATES',
     platform_tagline: 'AI Development Hub',
 };
 

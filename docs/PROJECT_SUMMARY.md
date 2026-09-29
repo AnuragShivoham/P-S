@@ -1,4 +1,4 @@
-# PROJECT-SKILL (AMIT-BODHIT) - Comprehensive Project Summary
+# PROJECT-SKILL (SOCRATES) - Comprehensive Project Summary
 
 ## Executive Summary
 
@@ -241,7 +241,7 @@ frontend/
 
 ```bash
 # Clone and install
-git clone https://github.com/amitbodhit/project-skill.git
+git clone https://github.com/socrates/project-skill.git
 cd project-skill
 npm run install:all
 
@@ -408,7 +408,7 @@ PORT=3001
 NODE_ENV=development
 
 # Database
-DB_PATH=./data/amitbodhit.db
+DB_PATH=./data/socrates.db
 WORKSPACE_PATH=./workspace
 
 # AI Services
@@ -642,14 +642,14 @@ VITE_WS_URL=ws://localhost:3001
 
 ## Contact & Support
 
-- 📧 **Email**: support@amitbodhit.app
-- 💬 **Discord**: [Community Server](https://discord.gg/amitbodhit)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/amitbodhit/project-skill/issues)
+- 📧 **Email**: support@socrates.app
+- 💬 **Discord**: [Community Server](https://discord.gg/socrates)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/socrates/project-skill/issues)
 - 📖 **Docs**: This directory
 
 ---
 
-**PROJECT-SKILL (AMIT-BODHIT) v1.0.0**
+**PROJECT-SKILL (SOCRATES) v1.0.0**
 
 *AI-Powered Project Execution Mentor*
 
@@ -659,4 +659,4 @@ VITE_WS_URL=ws://localhost:3001
 
 **Last Updated**: March 2026  
 **Status**: Production Ready (Beta)  
-**Maintainer**: [@AmitBodhit](https://github.com/amitbodhit)
+**Maintainer**: [@socrates](https://github.com/socrates)

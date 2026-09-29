@@ -37,6 +37,7 @@ const get = p => req('GET', p);
 const post = (p, b) => req('POST', p, b);
 export const api = {
   req,
+  post,
   createUser: (email, name, skill_level) => post('/users', { email, name, skill_level }),
   getUser: (id) => get(`/users/${id}`),
   submitGoal: (uid, rg) => post('/goals/submit', { user_id: uid, raw_goal: rg }),
@@ -94,8 +95,8 @@ export const api = {
   submitCommunityProject: (data) => post('/projects/community/submit', data),
 
   // Auth
-  sendOtp: (email) => post('/auth/send-otp', { email }),
-  verifyOtp: (email, otp, name, role) => post('/auth/verify-otp', { email, otp, name, role }),
+  sendOtp: (email, action) => post('/auth/send-otp', { email, action }),
+  verifyOtp: (email, otp, name, role, action) => post('/auth/verify-otp', { email, otp, name, role, action }),
   loginAdmin: (email, password) => post('/auth/admin-login', { email, password }),
   loginGoogle: (credential, role) => post('/auth/google', { credential, role }),
   updateRole: (role) => req('PUT', '/auth/role', { role }),
@@ -134,4 +135,98 @@ export const api = {
   adminGetUsers: () => get('/admin/users'),
   adminUpdateUserRole: (id, role) => req('PUT', `/admin/users/${id}/role`, { role }),
   getPublicExtensions: () => get('/extensions/public'),
+
+  // Societal Problems API
+  submitProblem: (data) => post('/problems', data),
+  getProblems: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/problems?${qs}` : '/problems');
+  },
+  getProblemCategories: () => get('/problems/categories'),
+  getProblem: (id) => get(`/problems/${id}`),
+  analyzeProblem: (id) => post(`/problems/${id}/analyze`),
+  reviewProblem: (id, data) => post(`/problems/${id}/review`, data),
+  publishProblem: (id) => post(`/problems/${id}/publish`),
+  expressProblemInterest: (id, data) => post(`/problems/${id}/interest`, data),
+  convertProblemToProject: (id) => post(`/problems/${id}/create-project`),
+  createProblemCourse: (id) => post(`/problems/${id}/create-course`),
+  // Citizen dashboard API
+  getMyProblems: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/problems/my?${qs}` : '/problems/my');
+  },
+  getMyProblemStats: () => get('/problems/my/stats'),
+  updateProblem: (id, data) => req('PATCH', `/problems/${id}`, data),
+  deleteProblem: (id) => req('DELETE', `/problems/${id}`),
+
+  // Project Extensions (Architecture, Team, Traceability, Impact)
+  getProjectArchitecture: (id) => get(`/projects/${id}/architecture`),
+  generateProjectArchitecture: (id, notes = '') => post(`/projects/${id}/architecture/generate`, { notes }),
+  approveProjectArchitecture: (id, version) => post(`/projects/${id}/architecture/approve`, { version }),
+  getProjectTeam: (id) => get(`/projects/${id}/team`),
+  inviteProjectTeamMember: (id, data) => post(`/projects/${id}/team/invite`, data),
+  updateProjectTeamMember: (projectId, memberId, data) => req('PATCH', `/projects/${projectId}/team/member/${memberId}`, data),
+  getProjectRequirements: (id) => get(`/projects/${id}/requirements`),
+  addProjectRequirement: (id, data) => post(`/projects/${id}/requirements`, data),
+  getProjectImpact: (id) => get(`/projects/${id}/impact`),
+  logProjectImpact: (id, data) => post(`/projects/${id}/impact`, data),
+  getCollaborationSession: (id) => get(`/projects/${id}/collaboration/session`),
+  startCollaborationSession: (id, data) => post(`/projects/${id}/collaboration/session`, data),
+
+  // Problem Adoptions & AI Category Review
+  adoptProblem: (id, notes = '') => post(`/problems/${id}/adopt`, { notes }),
+  getProblemAdoptions: (id) => get(`/problems/${id}/adoptions`),
+  getProblemAiCategories: (id) => get(`/problems/${id}/ai-categories`),
+  reviewAiCategory: (problemId, catId, status, category_id) => req('PATCH', `/problems/${problemId}/ai-categories/${catId}`, { status, category_id }),
+
+  // Student Applications & Project Access Policy
+  applyToProject: (projectId, message = '') => post(`/projects/${projectId}/apply`, { message }),
+  getProjectApplications: (projectId) => get(`/projects/${projectId}/applications`),
+  reviewProjectApplication: (projectId, appId, status) => req('PATCH', `/projects/${projectId}/applications/${appId}`, { status }),
+  getMyProjectApplication: (projectId) => get(`/projects/${projectId}/my-application`),
+  setProjectAccessPolicy: (projectId, policy) => req('PUT', `/projects/${projectId}/access-policy`, policy),
+  getProjectAccessPolicy: (projectId) => get(`/projects/${projectId}/access-policy`),
+
+  // Media APIs
+  uploadMedia: (data) => post('/media/upload', data),
+  getSignedUploadUrl: (data) => post('/media/signed-url', data),
+
+  // Labour-Market Intelligence & Competency Alignment APIs
+  ingestLabourSignal: (data) => post('/labour/signals/ingest', data),
+  getLabourSignals: () => get('/labour/signals'),
+  getLabourSignal: (id) => get(`/labour/signals/${id}`),
+  getSkillsOntology: () => get('/labour/ontology/skills'),
+  getRolesOntology: () => get('/labour/ontology/roles'),
+  normalizeSkillText: (raw_text) => post('/labour/ontology/normalize', { raw_text }),
+  getLabourRequirements: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/requirements?${qs}` : '/labour/requirements');
+  },
+  submitRequirementReview: (id, data) => post(`/labour/requirements/${id}/review`, data),
+  getStudentEvidence: (id) => get(`/labour/students/${id}/evidence`),
+  evaluateStudentGap: (id, data) => post(`/labour/students/${id}/gap-analysis`, data),
+  getProjectUpgradePlan: (projectId, data) => post(`/labour/projects/${projectId}/upgrade-plan`, data),
+  applyProjectUpgrade: (projectId, data) => post(`/labour/projects/${projectId}/apply-upgrade`, data),
+  getCompetencyEvidence: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/evidence?${qs}` : '/labour/evidence');
+  },
+  recordCompetencyEvidence: (data) => post('/labour/evidence/record', data),
+  getEmployerCandidates: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.append(k, v); });
+    const qs = q.toString();
+    return get(qs ? `/labour/employer/candidates?${qs}` : '/labour/employer/candidates');
+  },
+  submitEmployerFeedback: (data) => post('/labour/employer/feedback', data),
+  getInstitutionCurriculumAnalysis: () => get('/labour/institution/curriculum-analysis')
 };
+

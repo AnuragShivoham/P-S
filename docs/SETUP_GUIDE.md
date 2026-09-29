@@ -1,4 +1,4 @@
-# PROJECT-SKILL (AMIT-BODHIT) - Complete Setup & Deployment Guide
+# PROJECT-SKILL (SOCRATES) - Complete Setup & Deployment Guide
 
 ## Table of Contents
 
@@ -63,7 +63,7 @@ PORT=3001
 NODE_ENV=development
 
 # Database
-DB_PATH=./data/amitbodhit.db
+DB_PATH=./data/socrates.db
 WORKSPACE_PATH=./workspace
 
 # AI Services
@@ -81,7 +81,7 @@ EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
-EMAIL_FROM=AMIT-BODHIT <noreply@amitbodhit.app>
+EMAIL_FROM=SOCRATES <noreply@socrates.app>
 
 # CORS (Frontend URL)
 FRONTEND_URL=http://localhost:5173
@@ -141,7 +141,7 @@ NODE_ENV=development               # development|production|test
 LOG_LEVEL=debug                    # debug|info|warn|error
 
 # === DATABASE ===
-DB_PATH=./data/amitbodhit.db      # SQLite database file
+DB_PATH=./data/socrates.db      # SQLite database file
 WORKSPACE_PATH=./workspace         # User workspace directory
 DB_BACKUP_INTERVAL=86400000        # Backup interval (24h in ms)
 
@@ -164,7 +164,7 @@ EMAIL_HOST=smtp.gmail.com         # SMTP host
 EMAIL_PORT=587                    # SMTP port
 EMAIL_USER=noreply@example.com    # SMTP username
 EMAIL_PASS=app_password           # SMTP password (use app passwords for Gmail)
-EMAIL_FROM=AMIT-BODHIT <noreply@amitbodhit.app>
+EMAIL_FROM=SOCRATES <noreply@socrates.app>
 EMAIL_TLS=true                    # Use TLS
 
 # === CORS & SECURITY ===
@@ -187,7 +187,7 @@ MAX_PROJECTS_PER_USER=10          # Max projects per user
 # Vite environment variables (frontend/.env.local)
 VITE_API_URL=http://localhost:3001
 VITE_WS_URL=ws://localhost:3001
-VITE_APP_NAME=AMIT-BODHIT
+VITE_APP_NAME=SOCRATES
 VITE_APP_VERSION=1.0.0
 ```
 
@@ -200,7 +200,7 @@ VITE_APP_VERSION=1.0.0
 The database automatically initializes on first run. No manual migration needed.
 
 ```bash
-# Database will create at: backend/data/amitbodhit.db
+# Database will create at: backend/data/socrates.db
 # Tables created:
 # - users
 # - projects
@@ -218,10 +218,10 @@ The database automatically initializes on first run. No manual migration needed.
 
 ```bash
 # Manual backup
-cp backend/data/amitbodhit.db backend/data/amitbodhit.db.backup
+cp backend/data/socrates.db backend/data/socrates.db.backup
 
 # Restore from backup
-cp backend/data/amitbodhit.db.backup backend/data/amitbodhit.db
+cp backend/data/socrates.db.backup backend/data/socrates.db
 ```
 
 ### Reset Database (Development Only)
@@ -229,7 +229,7 @@ cp backend/data/amitbodhit.db.backup backend/data/amitbodhit.db
 ```bash
 # WARNING: This will delete all data!
 cd backend
-rm -f data/amitbodhit.db
+rm -f data/socrates.db
 npm run dev  # Database will recreate on startup
 ```
 
@@ -303,7 +303,7 @@ taskkill /PID <PID> /F  # Windows
 cd backend && npm run dev
 
 # Solution 2: Clean database
-rm backend/data/amitbodhit.db*
+rm backend/data/socrates.db*
 npm run dev  # Recreate
 ```
 
@@ -396,7 +396,7 @@ npm install -g pm2
 cat > backend/ecosystem.config.js << 'EOF'
 module.exports = {
   apps: [{
-    name: 'amit-bodhit-backend',
+    name: 'SOCRATES-backend',
     script: './src/server.js',
     instances: 'max',
     exec_mode: 'cluster',
@@ -468,27 +468,27 @@ CMD ["nginx", "-g", "daemon off;"]
 
 ```bash
 # Build and run
-docker build -t amit-bodhit-backend ./backend
-docker build -t amit-bodhit-frontend ./frontend
+docker build -t SOCRATES-backend ./backend
+docker build -t SOCRATES-frontend ./frontend
 
-docker run -p 3001:3001 -e NODE_ENV=production amit-bodhit-backend
-docker run -p 80:80 amit-bodhit-frontend
+docker run -p 3001:3001 -e NODE_ENV=production SOCRATES-backend
+docker run -p 80:80 SOCRATES-frontend
 ```
 
 #### 3. **Using Systemd (Linux)**
 
 ```bash
 # Create service file
-sudo tee /etc/systemd/system/amit-bodhit.service << 'EOF'
+sudo tee /etc/systemd/system/SOCRATES.service << 'EOF'
 [Unit]
-Description=AMIT-BODHIT AI Mentor
+Description=SOCRATES AI Mentor
 After=network.target
 
 [Service]
 Type=simple
-User=amit-bodhit
-WorkingDirectory=/opt/amit-bodhit/backend
-ExecStart=/usr/bin/node /opt/amit-bodhit/backend/src/server.js
+User=SOCRATES
+WorkingDirectory=/opt/SOCRATES/backend
+ExecStart=/usr/bin/node /opt/SOCRATES/backend/src/server.js
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -500,22 +500,22 @@ EOF
 
 # Enable and start
 sudo systemctl daemon-reload
-sudo systemctl enable amit-bodhit
-sudo systemctl start amit-bodhit
-sudo systemctl status amit-bodhit
+sudo systemctl enable SOCRATES
+sudo systemctl start SOCRATES
+sudo systemctl status SOCRATES
 ```
 
 #### 4. **Nginx Reverse Proxy**
 
 ```nginx
-# /etc/nginx/sites-available/amit-bodhit
+# /etc/nginx/sites-available/SOCRATES
 upstream backend {
     server localhost:3001;
 }
 
 server {
     listen 80;
-    server_name amitbodhit.example.com;
+    server_name socrates.example.com;
 
     # Redirect to HTTPS
     return 301 https://$server_name$request_uri;
@@ -523,10 +523,10 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name amitbodhit.example.com;
+    server_name socrates.example.com;
 
-    ssl_certificate /etc/letsencrypt/live/amitbodhit.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/amitbodhit.example.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/socrates.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/socrates.example.com/privkey.pem;
 
     # Security headers
     add_header Strict-Transport-Security "max-age=31536000" always;
@@ -573,7 +573,7 @@ server {
 ```bash
 # Check backend health
 curl http://localhost:3001/health
-# Expected: { "status": "ok", "service": "AMIT-BODHIT", "version": "1.0.0" }
+# Expected: { "status": "ok", "service": "SOCRATES", "version": "1.0.0" }
 
 # Check database
 curl http://localhost:3001/api/v1/health/db
@@ -590,7 +590,7 @@ tail -f debug.log
 pm2 logs
 
 # View Docker logs
-docker logs amit-bodhit-backend
+docker logs SOCRATES-backend
 ```
 
 ### Performance Monitoring
@@ -610,13 +610,13 @@ clinic doctor -- npm test
 
 ```bash
 # Vacuum database (compact)
-sqlite3 backend/data/amitbodhit.db "VACUUM;"
+sqlite3 backend/data/socrates.db "VACUUM;"
 
 # Check integrity
-sqlite3 backend/data/amitbodhit.db "PRAGMA integrity_check;"
+sqlite3 backend/data/socrates.db "PRAGMA integrity_check;"
 
 # View table sizes
-sqlite3 backend/data/amitbodhit.db "SELECT name, page_count * page_size / 1024 / 1024 as size_mb FROM pragma_page_count(), pragma_page_size(), sqlite_master WHERE type='table';"
+sqlite3 backend/data/socrates.db "SELECT name, page_count * page_size / 1024 / 1024 as size_mb FROM pragma_page_count(), pragma_page_size(), sqlite_master WHERE type='table';"
 ```
 
 ### Backup Strategy
@@ -625,20 +625,20 @@ sqlite3 backend/data/amitbodhit.db "SELECT name, page_count * page_size / 1024 /
 #!/bin/bash
 # backup.sh - Daily backup script
 
-BACKUP_DIR="/backups/amit-bodhit"
-DB_PATH="backend/data/amitbodhit.db"
+BACKUP_DIR="/backups/SOCRATES"
+DB_PATH="backend/data/socrates.db"
 DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p $BACKUP_DIR
 
 # Database backup
-cp $DB_PATH $BACKUP_DIR/amitbodhit_$DATE.db
+cp $DB_PATH $BACKUP_DIR/socrates_$DATE.db
 
 # Compress old backups
 find $BACKUP_DIR -name "*.db" -mtime +7 -exec gzip {} \;
 
 # Upload to cloud (optional)
-# aws s3 cp $BACKUP_DIR s3://my-backups/amit-bodhit/ --recursive
+# aws s3 cp $BACKUP_DIR s3://my-backups/SOCRATES/ --recursive
 
 echo "Backup completed: $DATE"
 ```
@@ -686,10 +686,10 @@ echo "Backup completed: $DATE"
 
 ## Support & Troubleshooting Resources
 
-- **Discord**: https://discord.gg/amit-bodhit
-- **GitHub Issues**: https://github.com/amitbodhit/project-skill/issues
-- **Documentation**: https://docs.amitbodhit.app
-- **Email**: support@amitbodhit.app
+- **Discord**: https://discord.gg/SOCRATES
+- **GitHub Issues**: https://github.com/socrates/project-skill/issues
+- **Documentation**: https://docs.socrates.app
+- **Email**: support@socrates.app
 
 ---
 

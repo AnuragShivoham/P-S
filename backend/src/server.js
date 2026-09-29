@@ -13,11 +13,16 @@ const authMiddleware = require('./middleware/auth');
 const { setupTerminalWS } = require('./services/terminalService');
 const { handleConnection, initHeartbeat } = require('./services/socketService');
 const previewRouter = require('./routes/preview');
+const problemsRouter = require('./routes/problems');
+const projectExtensionsRouter = require('./routes/projectExtensions');
+const mediaRouter = require('./routes/media');
+const optionalAuth = require('./middleware/optionalAuth');
 
 const app = express();
 
 app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'], credentials: true }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Debug Middleware: Log all requests
 app.use((req, res, next) => {
@@ -25,9 +30,22 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'AMIT-BODHIT', version: '1.0.0' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'SOCRATES', version: '1.0.0' }));
 app.use('/api/v1/preview', previewRouter);
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/media', mediaRouter);
+
+const labourRouter = require('./routes/labourIntelligence');
+
+// Societal Problems Feature Mount (with feature-toggle kill switch)
+if (process.env.ENABLE_SOCIETAL_PROBLEMS !== 'false') {
+  app.use('/api/v1/problems', optionalAuth, problemsRouter);
+  app.use('/api/v1/projects', authMiddleware, projectExtensionsRouter);
+}
+
+// Labour-Market Intelligence & Competency Alignment Feature Mount
+app.use('/api/v1/labour', optionalAuth, labourRouter);
+
 app.use('/api/v1/fs', authMiddleware, fsRouter);
 app.use('/api/v1', authMiddleware, apiRouter);
 
@@ -64,7 +82,7 @@ server.on('upgrade', (request, socket, head) => {
 server.listen(config.PORT, () => {
   console.log(`
  ╔══════════════════════════════════════╗
- ║  AMIT-BODHIT Backend                 ║
+ ║  SOCRATES Backend                    ║
  ║  http://localhost:${config.PORT}              ║
  ╚══════════════════════════════════════╝`);
 });

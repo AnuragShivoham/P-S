@@ -1,6 +1,6 @@
 const { callClaudeJSON } = require('../db/claude');
 
-const SYSTEM = `You are the AMIT-BODHIT Architect. 
+const SYSTEM = `You are the SOCRATES Architect. 
 Your goal is to transform user intent into a high-impact project configuration.
 
 RULES:

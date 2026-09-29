@@ -1,6 +1,6 @@
 const { callClaudeJSON } = require('../db/claude');
 
-const SYSTEM = `You are AMIT-BODHIT automation advisor.
+const SYSTEM = `You are SOCRATES automation advisor.
 After a milestone is complete, suggest 2-3 automation tools to reduce manual work.
 
 RULES:

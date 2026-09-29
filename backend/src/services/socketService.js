@@ -103,7 +103,7 @@ const socketService = {
             }
 
             // 2. Auth & Role binding
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'amitbodhit_secret_key');
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'socrates_secret_key');
             ws.userId = decoded.id;
             ws.projectId = projectId;
             ws.isAlive = true;

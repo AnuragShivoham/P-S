@@ -10,7 +10,7 @@ const TaskEngine = {
      * Breakdown a high-level task into atomic technical steps.
      */
     async breakdownTask(task, projectContext) {
-        const prompt = `You are the AMIT-BODHIT Technical Architect.
+        const prompt = `You are the SOCRATES Technical Architect.
 Break the following task into 3-5 ATOMIC technical steps.
 The steps must be actionable and sequential.
 
@@ -28,7 +28,7 @@ RETURN JSON: { "steps": ["step 1", "step 2", ...] }`;
      * Validate current file content against task requirements.
      */
     async validateTask(task, fileContent, filePath, project) {
-        const prompt = `You are the AMIT-BODHIT Code Validator.
+        const prompt = `You are the SOCRATES Code Validator.
 Analyze the user's code for Task: "${task.title}".
 Technical Requirement: "${task.technical_goal}"
 
@@ -55,7 +55,7 @@ RETURN JSON: { "success": true/false, "failed_checks": ["missing X", "logic erro
      * L4: Solution (Last resort, high penalty)
      */
     async getHint(level, task, currentCode, history) {
-        const systemPrompt = `You are the AMIT-BODHIT Mentor. 
+        const systemPrompt = `You are the SOCRATES Mentor. 
 Your goal is to guide the student WITHOUT giving the answer immediately.
 Follow the LADDER logic strictly.
 
