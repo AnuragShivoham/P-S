@@ -1,44 +1,29 @@
-# Project-Skill (SOCRATES) - Final Fixes
+# SOCRATES Development Status & Verification Checklist
 
-## Current Status
-- [x] Full platform code (DB/API/pages/IDE/chat/terminal)
-- [x] npm install:all complete
-- [x] Git history (blackboxai/completion)
+## Active Platform Capabilities
 
-## Scan Summary (Restart)
+- [x] Dual-Pipeline Execution (Pipeline A & Pipeline B)
+- [x] Passwordless OTP Authentication & Google OAuth
+- [x] Role-Based Access Control (Student, Mentor, Citizen, University, Admin)
+- [x] GoalClarifier Socratic Technical Interview Engine
+- [x] MilestoneGenerator & TaskPlanner with Starter Skeletons (TODOs)
+- [x] Embedded Monaco Cloud IDE & Interactive xterm.js Terminal (node-pty)
+- [x] Workspace Sandboxing & Path Traversal Guards
+- [x] Terminal Command Denylist Filtering
+- [x] Binary Magic-Byte Media Inspection (PNG, JPEG, WebP, MP4)
+- [x] Leaflet Geospatial Mapping & Location Privacy Masking
+- [x] AI Problem Intelligence & Deduplication
+- [x] Project Architecture Generator (Interactive Mermaid diagrams)
+- [x] Student Team Roster & Role Application Workflow
+- [x] Requirements Traceability Matrix & Real-World Impact Tracking
+- [x] Labour-Market Intelligence, Job Signal Ingestion & Skill Ontology
+- [x] Faculty/Expert Human Review for Requirement Matrix
+- [x] Competency Gap Engine & Automated Project Upgrades
+- [x] Verified Evidence Store & Loop-Closure Feedback
+- [x] Native Node.js SQLite Persistence (`node:sqlite` in WAL mode)
 
-**COMPLETED & VERIFIED:**
-- [x] Backend foundation (Express, auth middleware, SQLite schema complete)
-- [x] FS routes/workspaceService (nested files/directories/templates/stats)
-- [x] Terminal service (node-pty WS, command validation/logging)
-- [x] Frontend pages/routing (App/Dashboard/Ide/Login/Goal etc.)
-- [x] ChatBot.jsx (frontend ready, structured responses)
-- [x] Monaco editor + xterm + file explorer code
-- [x] AI engines files (goalClarifier etc.)
-- [x] Docs (architecture/API/setup)
-- [x] Git history + .gitignore
+## Continuous Quality & Operational Items
 
-**BROKEN/MISSING (User confirmed):**
-- [ ] Chat API routes (/api/v1/chat/message, /api/v1/projects/:id/conversation) - 404 dummy
-- [ ] Git clone endpoint/service
-- [ ] Terminal connection (servers not running?)
-- [ ] IDE nested FS/git "not working" (frontend calls?)
-- [ ] Page routing (pages not loading?)
-
-**RESTART PLAN:**
-1. Add chat API → real guidedExecution + conversation_turns DB
-2. Add git clone POST /fs/git-clone/:projectId
-3. Manual server run + browser test IDE/terminal/chat
-4. Fix any runtime errors
-5. Complete platform ✓
-
-- [ ] Chat API routes (/chat/message, /projects/conversation) - real AI not dummy
-- [ ] Git clone endpoint (fs/git-clone)
-- [ ] Verify nested FS/terminal in IDE
-- [ ] Test full workflow
-
-## Next Steps
-1. Add missing chat API → real guidedExecution responses
-2. Add git clone → workspaceService
-3. Test IDE (browser_action)
-4. Complete ✓
+- [ ] Optional: Add automated end-to-end browser integration tests with Playwright.
+- [ ] Monitor Groq Cloud model deprecation notices and update model IDs accordingly.
+- [ ] Implement database backup automation scripts for production deployments.

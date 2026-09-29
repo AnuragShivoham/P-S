@@ -1,9 +1,9 @@
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 require('dotenv').config();
 
 const dbPath = process.env.DB_PATH || './data/socrates.db';
-const db = new Database(dbPath);
+const db = new DatabaseSync(dbPath);
 
 try {
     db.prepare("ALTER TABLE courses ADD COLUMN badge TEXT DEFAULT 'official'").run();
