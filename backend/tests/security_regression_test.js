@@ -193,12 +193,26 @@ async function main() {
       email: `security-new-admin-${Date.now()}@example.test`,
       name: 'Security Test New Admin'
     };
+    const provisionedMentor = {
+      id: `security-mentor-${Date.now()}`,
+      email: `security-mentor-${Date.now()}@example.test`,
+      name: 'Security Test Mentor'
+    };
+    const provisionedUniversity = {
+      id: `security-university-${Date.now()}`,
+      email: `security-university-${Date.now()}@example.test`,
+      name: 'Security Test University'
+    };
     testDb.prepare('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)')
       .run(student.id, student.email, student.name, 'student');
     testDb.prepare('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)')
       .run(attacker.id, attacker.email, attacker.name, 'student');
     testDb.prepare('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)')
       .run(newAdmin.id, newAdmin.email, newAdmin.name, 'student');
+    testDb.prepare('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)')
+      .run(provisionedMentor.id, provisionedMentor.email, provisionedMentor.name, 'mentor');
+    testDb.prepare('INSERT INTO users (id, email, name, role) VALUES (?, ?, ?, ?)')
+      .run(provisionedUniversity.id, provisionedUniversity.email, provisionedUniversity.name, 'university');
     const studentToken = jwt.sign({ id: student.id, email: student.email, role: 'student' }, secret, { expiresIn: '5m' });
     const attackerToken = jwt.sign({ id: attacker.id, email: attacker.email, role: 'student' }, secret, { expiresIn: '5m' });
 
@@ -214,6 +228,37 @@ async function main() {
     });
     assert.equal(response.status, 403);
     report('self-service mentor account creation is rejected');
+
+    const expiresAt = new Date(Date.now() + 60000).toISOString();
+    testDb.prepare('INSERT INTO otp_requests (id, email, otp, expires_at) VALUES (?, ?, ?, ?)')
+      .run('provisioned-mentor-otp', provisionedMentor.email, '234561', expiresAt);
+    response = await request('/api/v1/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email: provisionedMentor.email, otp: '234561', role: 'mentor', action: 'login' })
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).user.role, 'mentor');
+    report('administrator-provisioned mentor can use the signup page OTP sign-in path');
+
+    testDb.prepare('INSERT INTO otp_requests (id, email, otp, expires_at) VALUES (?, ?, ?, ?)')
+      .run('provisioned-university-otp', provisionedUniversity.email, '234562', expiresAt);
+    response = await request('/api/v1/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email: provisionedUniversity.email, otp: '234562', role: 'university', action: 'login' })
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).user.role, 'university');
+    report('administrator-provisioned university can use the signup page OTP sign-in path');
+
+    testDb.prepare('INSERT INTO otp_requests (id, email, otp, expires_at) VALUES (?, ?, ?, ?)')
+      .run('wrong-provisioned-role-otp', provisionedMentor.email, '234563', expiresAt);
+    response = await request('/api/v1/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email: provisionedMentor.email, otp: '234563', role: 'university', action: 'login' })
+    });
+    assert.equal(response.status, 403);
+    assert.equal(testDb.prepare('SELECT used FROM otp_requests WHERE id = ?').get('wrong-provisioned-role-otp').used, 1);
+    report('provisioned role cannot be changed by selecting another role during OTP login');
 
     response = await request('/api/v1/admin/users/demo_student/role', {
       method: 'PUT', token: studentToken, body: JSON.stringify({ role: 'admin' })

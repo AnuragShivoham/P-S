@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Shield, GraduationCap, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
 
@@ -18,6 +18,8 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const isProvisionedRole = ['mentor', 'university'].includes(role);
+  const accountAction = isProvisionedRole ? 'login' : 'signup';
 
   // If already logged in, redirect
   useEffect(() => {
@@ -26,15 +28,17 @@ export default function SignupPage() {
 
   const handleSendOtp = async () => {
     if (!email) return setError('Email is required');
-    if (!name) return setError('Name is required');
+    if (!isProvisionedRole && !name) return setError('Name is required');
     setLoading(true);
     setError('');
     try {
-      const res = await api.sendOtp(email, 'signup');
+      const res = await api.sendOtp(email.trim(), accountAction);
       setMsg(res.message);
       setStep('otp');
     } catch (e) {
-      setError(e.message);
+      setError(isProvisionedRole && e.message.includes('Account not found')
+        ? `No ${role} account is provisioned for this email. Ask an administrator to create the account first.`
+        : e.message);
     }
     setLoading(false);
   };
@@ -67,7 +71,7 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.verifyOtp(email, otp, name, role, 'signup');
+      const res = await api.verifyOtp(email.trim(), otp, name, role, accountAction);
       setAuth(res.user, res.token);
       if (res.user.role === 'citizen') {
         navigate('/citizen-dashboard');
@@ -89,13 +93,15 @@ export default function SignupPage() {
   return (
     <div className="goal-pg fade-in">
       <div className="goal-box" style={{ maxWidth: 420 }}>
-        <div className="g-eye">CREATE ACCOUNT</div>
+        <div className="g-eye">{isProvisionedRole ? 'PROVISIONED ACCOUNT ACCESS' : 'CREATE ACCOUNT'}</div>
         <h1 className="g-h1">
-          {step === 'signup' && 'Join SOCRATES'}
+          {step === 'signup' && (isProvisionedRole ? `Sign in as ${role === 'mentor' ? 'Mentor' : 'University'}` : 'Join SOCRATES')}
           {step === 'otp' && 'Verify Email'}
         </h1>
         <p className="g-sub">
-          {step === 'signup' && 'Create a student or citizen account. Privileged roles are assigned by an existing administrator.'}
+          {step === 'signup' && (isProvisionedRole
+            ? 'Mentor and University accounts must be created by an administrator. Enter your provisioned email to receive a sign-in code.'
+            : 'Create a student or citizen account. Mentor, University, and Admin roles are assigned by an administrator.')}
           {step === 'otp' && `We've sent a 6-digit code to ${email}.`}
         </p>
 
@@ -130,42 +136,54 @@ export default function SignupPage() {
                 >
                   🌍 Citizen
                 </button>
+                <button
+                  onClick={() => setRole('mentor')}
+                  className={`btn ${role === 'mentor' ? 'btn-p' : 'btn-g'}`}
+                  style={{ justifyContent: 'center', fontSize: 10 }}
+                >
+                  <Shield size={13} /> Mentor
+                </button>
+                <button
+                  onClick={() => setRole('university')}
+                  className={`btn ${role === 'university' ? 'btn-p' : 'btn-g'}`}
+                  style={{ justifyContent: 'center', fontSize: 10 }}
+                >
+                  <GraduationCap size={13} /> University
+                </button>
               </div>
             </div>
 
-            {role !== 'admin' && (
-              <>
-                <div style={{ marginTop: 24, marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={() => setError('Google sign-up is blocked. Add https://p-s-khaki.vercel.app and http://localhost:5173 to the Google OAuth Authorized JavaScript origins in Google Cloud Console.')}
-                    theme="filled_black"
-                    shape="pill"
-                    width="380"
-                    text="signup_with"
-                  />
-                </div>
-
-                <div style={{ position: 'relative', textAlign: 'center', marginBottom: 24 }}>
-                  <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
-                  <span style={{ 
-                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                    background: 'var(--bg)', padding: '0 12px', color: 'var(--tx-m)', fontSize: 10, letterSpacing: '.1em'
-                  }}>OR EMAIL</span>
-                </div>
-              </>
-            )}
-
-            <div style={{ marginBottom: 16 }}>
-              <label className="lbl">Full Name</label>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="John Doe"
-                value={name}
-                onChange={e => setName(e.target.value)}
+            <div style={{ marginTop: 24, marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => setError('Google sign-in is blocked. Check the Google OAuth Authorized JavaScript origins for this site.')}
+                theme="filled_black"
+                shape="pill"
+                width="380"
+                text={isProvisionedRole ? 'signin_with' : 'signup_with'}
               />
             </div>
+
+            <div style={{ position: 'relative', textAlign: 'center', marginBottom: 24 }}>
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border)' }} />
+              <span style={{ 
+                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                background: 'var(--bg)', padding: '0 12px', color: 'var(--tx-m)', fontSize: 10, letterSpacing: '.1em'
+              }}>OR EMAIL</span>
+            </div>
+
+            {!isProvisionedRole && (
+              <div style={{ marginBottom: 16 }}>
+                <label className="lbl">Full Name</label>
+                <input 
+                  type="text" 
+                  className="input" 
+                  placeholder="John Doe"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
+            )}
 
             <div style={{ marginBottom: 20 }}>
               <label className="lbl">Email Address</label>
@@ -184,7 +202,7 @@ export default function SignupPage() {
               onClick={handleSendOtp}
               disabled={loading}
             >
-              {loading ? <Loader2 className="spin" /> : <>Sign Up <ArrowRight size={16} /></>}
+              {loading ? <Loader2 className="spin" /> : <>{isProvisionedRole ? 'Continue to Sign In' : 'Sign Up'} <ArrowRight size={16} /></>}
             </button>
 
             <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: 'var(--tx-2)' }}>

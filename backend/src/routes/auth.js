@@ -190,15 +190,16 @@ router.post('/verify-otp', rateLimitAuth('verify-otp', { emailLimit: 5, ipLimit:
   ).get(email.toLowerCase(), String(otp), now);
 
   if (!record) return res.status(401).json({ error: 'Invalid or expired OTP' });
+  db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
 
   const normalizedEmail = email.trim().toLowerCase();
   const existingUser = db.prepare('SELECT role FROM users WHERE email = ?').get(normalizedEmail);
   if (existingUser?.role === 'admin') {
     return res.status(403).json({ error: 'Admin accounts must sign in using the Admin option and password.' });
   }
-
-  // Mark used
-  db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
+  if (['mentor', 'university'].includes(role) && existingUser?.role !== role) {
+    return res.status(403).json({ error: `${role} accounts must be provisioned by an administrator before sign-in.` });
+  }
 
   const userExists = Boolean(existingUser);
   if (!userExists && ['mentor', 'university'].includes(role)) {
