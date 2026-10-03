@@ -1,5 +1,14 @@
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+let Client = null;
+let StdioClientTransport = null;
+
+try {
+    const sdkClient = require('@modelcontextprotocol/sdk/client/index.js');
+    const sdkTransport = require('@modelcontextprotocol/sdk/client/stdio.js');
+    Client = sdkClient.Client;
+    StdioClientTransport = sdkTransport.StdioClientTransport;
+} catch (e) {
+    // Optional dependency not installed
+}
 
 /**
  * MCP Service: Powers the AI Agent extensions.
@@ -11,6 +20,10 @@ class MCPService {
     }
 
     async connectToServer(name, command, args = []) {
+        if (!Client || !StdioClientTransport) {
+            console.warn(`[MCP] Cannot connect to ${name}: @modelcontextprotocol/sdk is not installed.`);
+            return false;
+        }
         try {
             console.log(`[MCP] Connecting to server: ${name}...`);
             const transport = new StdioClientTransport({ command, args });

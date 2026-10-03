@@ -1,4 +1,5 @@
 import React from 'react';
+import { api } from '../../api/client';
 import { 
     MapPin, Target, Zap, Shield, CheckCircle2, 
     Circle, Activity, ArrowRight, BrainCircuit,
@@ -31,11 +32,8 @@ export default function ProgressPanel({ data, loading, onToggleSOS }) {
         const fetchMentors = async () => {
             try {
                 setLoadingMentors(true);
-                const res = await fetch('/api/v1/mentors', {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('ab_token')}` }
-                });
-                const d = await res.json();
-                setMentors(d);
+                const d = await api.getMentors();
+                setMentors(Array.isArray(d) ? d : []);
             } catch(e) {} finally { setLoadingMentors(false); }
         };
         fetchMentors();

@@ -3,6 +3,10 @@ const router = express.Router();
 const WorkspaceService = require('../services/workspaceService');
 const db = require('../db/database');
 const fs = require('fs');
+const { userCanAccessProject } = require('../security/projectAccess');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 const authorizedDeletions = new Map();
 
@@ -12,7 +16,8 @@ router.post('/authorize-deletion', (req, res) => {
     const { projectId, path: targetPath } = req.body;
     if (!projectId || targetPath === undefined) throw new Error("projectId and path required");
 
-    const normTarget = targetPath.replace(/^[\/\\]+/, '');
+    const normTarget = WorkspaceService.normalizeRelativePath(projectId, targetPath);
+    getUserProject(req, projectId);
     const expiry = Date.now() + 120000;
     const key = `${req.user.id}:${projectId}`;
     
@@ -28,7 +33,7 @@ router.post('/authorize-deletion', (req, res) => {
 function getUserProject(req, projectId) {
   if (projectId) {
     const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    if (!project || !userCanAccessProject(req.user, projectId)) {
       throw new Error('Access denied');
     }
     return project;
@@ -155,7 +160,7 @@ router.delete('/file/:projectId/*', (req, res) => {
 
     const project = getUserProject(req, projectId);
 
-    const normReqPath = filePath.replace(/^[\/\\]+/, '');
+    const normReqPath = WorkspaceService.normalizeRelativePath(projectId, filePath);
     let isAuthorized = false;
     const key = `${req.user.id}:${projectId}`;
     const authRecord = authorizedDeletions.get(key);
@@ -292,7 +297,7 @@ router.delete('/file', (req, res) => {
     const filePath = req.query.path;
     if (!filePath) return res.status(400).json({ error: 'path required' });
 
-    const normReqPath = filePath.replace(/^[\/\\]+/, '');
+    const normReqPath = WorkspaceService.normalizeRelativePath(project.id, filePath);
     let isAuthorized = false;
     const key = `${req.user.id}:${project.id}`;
     const authRecord = authorizedDeletions.get(key);
@@ -350,11 +355,9 @@ router.post('/git-clone', async (req, res) => {
     // Ensure it's inside the workspace
     const fullPath = WorkspaceService.validateFilePath(project.id, targetDir);
 
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-    
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    let parsedUrl;
+    try { parsedUrl = new URL(url); } catch { parsedUrl = null; }
+    if (!parsedUrl || !['http:', 'https:'].includes(parsedUrl.protocol)) {
       throw new Error('Invalid git URL');
     }
     
@@ -364,7 +367,12 @@ router.post('/git-clone', async (req, res) => {
       fs.mkdirSync(fullPath, { recursive: true });
     }
 
-    await execPromise(`git clone "${url.replace(/"/g, '')}" .`, { cwd: fullPath });
+    await execFileAsync('git', ['clone', url, '.'], {
+      cwd: fullPath,
+      timeout: 120000,
+      maxBuffer: 5 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    });
     
     res.json({ success: true, path: targetDir });
   } catch (err) {
@@ -387,10 +395,6 @@ router.post('/git-push', async (req, res) => {
       return res.status(404).json({ error: 'Workspace not found' });
     }
 
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execPromise = util.promisify(exec);
-
     // Check if git is initialized
     if (!fs.existsSync(require('path').join(workspacePath, '.git'))) {
       return res.status(400).json({ error: 'No git repository found. Use Git Clone first or run `git init` in the terminal.' });
@@ -400,10 +404,10 @@ router.post('/git-push', async (req, res) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const commitMsg = `${message} [${timestamp}]`;
     
-    await execPromise('git add -A', { cwd: workspacePath });
+    await execFileAsync('git', ['add', '-A'], { cwd: workspacePath, timeout: 30000, maxBuffer: 5 * 1024 * 1024 });
     
     try {
-      await execPromise(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: workspacePath });
+      await execFileAsync('git', ['commit', '-m', commitMsg], { cwd: workspacePath, timeout: 30000, maxBuffer: 5 * 1024 * 1024 });
     } catch (commitErr) {
       // No changes to commit is not an error — check stdout, stderr AND message (Windows puts it in stdout)
       const errText = (commitErr.stdout || '') + (commitErr.stderr || '') + (commitErr.message || '');
@@ -414,7 +418,12 @@ router.post('/git-push', async (req, res) => {
     }
     
     try {
-      const { stdout } = await execPromise('git push', { cwd: workspacePath, timeout: 30000 });
+      const { stdout } = await execFileAsync('git', ['push'], {
+        cwd: workspacePath,
+        timeout: 30000,
+        maxBuffer: 5 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+      });
       res.json({ success: true, message: `Pushed successfully`, output: stdout });
     } catch (pushErr) {
       // Push failed — still committed locally
@@ -438,7 +447,7 @@ router.post('/init/:projectId', (req, res) => {
 
     // Verify project belongs to user
     const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    if (!project || !userCanAccessProject(req.user, projectId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -459,7 +468,7 @@ router.get('/stats/:projectId', (req, res) => {
 
     // Verify project belongs to user
     const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    if (!project || !userCanAccessProject(req.user, projectId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

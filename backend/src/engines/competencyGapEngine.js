@@ -447,8 +447,9 @@ function recordVerifiedEvidence({
   evidence_type = 'ide_validation',
   evidence_location = 'workspace/docker',
   evidence_payload = {},
-  reviewer_id = 'demo_mentor'
+  reviewer_id
 }) {
+  if (!reviewer_id) throw new Error('A verified reviewer_id is required to record competency evidence.');
   const evidenceId = 'ev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
   const payloadStr = typeof evidence_payload === 'string' ? evidence_payload : JSON.stringify(evidence_payload);
@@ -504,8 +505,8 @@ function recordVerifiedEvidence({
  * Ingests Employer Placement Feedback & closes loop back into Labour Intelligence signals
  */
 function recordEmployerFeedback({
-  employer_id = 'demo_employer',
-  candidate_id = 'demo_student',
+  employer_id,
+  candidate_id,
   role_id = 'software-engineering-intern',
   hiring_status = 'hired',
   competency_feedback = {},
@@ -513,6 +514,7 @@ function recordEmployerFeedback({
   readiness_rating = 5,
   communication_rating = 4
 }) {
+  if (!employer_id || !candidate_id) throw new Error('Verified employer_id and candidate_id are required.');
   const feedbackId = 'fb_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   const feedbackJson = typeof competency_feedback === 'string' ? competency_feedback : JSON.stringify(competency_feedback);
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import { getWsUrl } from '../api/config';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
@@ -38,9 +39,7 @@ export default function TerminalComponent({ projectId, token }) {
     fitAddonRef.current.fit();
 
     // Establish WebSocket connection
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/terminal?projectId=${projectId}&token=${token}`;
-
+    const wsUrl = getWsUrl('/api/v1/terminal', { projectId, token });
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

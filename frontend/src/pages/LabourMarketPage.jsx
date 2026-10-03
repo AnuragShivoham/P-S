@@ -11,6 +11,8 @@ import { api } from '../api/client';
 import { useStore } from '../store';
 import { Spinner, StatusBadge } from '../components/UI';
 
+const isStaffRole = role => ['mentor', 'admin', 'university'].includes(role);
+
 function Modal({ title, onClose, children }) {
   return (
     <div style={{
@@ -39,7 +41,7 @@ function Modal({ title, onClose, children }) {
 
 export default function LabourMarketPage() {
   const navigate = useNavigate();
-  const { role, userName, token } = useStore();
+  const { role, userId } = useStore();
 
   const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'matrix' | 'readiness' | 'evidence' | 'employer' | 'institution'
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,8 @@ export default function LabourMarketPage() {
   const [requirements, setRequirements] = useState([]);
   const [skills, setSkills] = useState([]);
   const [roles, setRoles] = useState([]);
-  const [selectedStudentId, setSelectedStudentId] = useState('demo_student');
+  const [selectedStudentId, setSelectedStudentId] = useState(userId || '');
+  const [studentOptions, setStudentOptions] = useState([]);
   const [studentEvidence, setStudentEvidence] = useState(null);
   const [gapResult, setGapResult] = useState(null);
   const [upgradePlan, setUpgradePlan] = useState(null);
@@ -183,14 +186,15 @@ Round 4: Technical Bar Raiser & Engineering Leadership Review`,
     setError(null);
     try {
       // Use allSettled so one failure doesn't block all data from loading
-      const [sigsRes, reqsRes, skillsRes, rolesRes, evidRes, candRes, currRes] = await Promise.allSettled([
-        api.getLabourSignals(),
+      const [sigsRes, reqsRes, skillsRes, rolesRes, evidRes, candRes, currRes, studentsRes] = await Promise.allSettled([
+        ['mentor', 'admin', 'university'].includes(role) ? api.getLabourSignals() : Promise.resolve({ signals: [] }),
         api.getLabourRequirements(),
         api.getSkillsOntology(),
         api.getRolesOntology(),
-        api.getCompetencyEvidence(),
-        api.getEmployerCandidates(),
-        api.getInstitutionCurriculumAnalysis()
+        api.getCompetencyEvidence(userId ? { learner_id: userId } : {}),
+        ['admin'].includes(role) ? api.getEmployerCandidates() : Promise.resolve({ candidates: [] }),
+        ['admin', 'university'].includes(role) ? api.getInstitutionCurriculumAnalysis() : Promise.resolve(null),
+        isStaffRole(role) ? api.getLabourStudents() : Promise.resolve({ students: [] })
       ]);
 
       const val = (r, fallback) => (r.status === 'fulfilled' ? r.value : fallback);
@@ -212,9 +216,15 @@ Round 4: Technical Bar Raiser & Engineering Leadership Review`,
         verified_evidence: Array.isArray(c.verified_evidence) ? c.verified_evidence : []
       })));
       setCurriculumReport(val(currRes, null));
+      const students = val(studentsRes, {}).students || [];
+      setStudentOptions(students);
+      if (isStaffRole(role) && !students.some(student => student.id === selectedStudentId)) {
+        setSelectedStudentId(students[0]?.id || '');
+      }
 
       // Load student evidence independently (won't kill page if it fails)
-      await loadStudent(selectedStudentId);
+      const learnerId = isStaffRole(role) ? (students.some(student => student.id === selectedStudentId) ? selectedStudentId : students[0]?.id) : userId;
+      if (learnerId) await loadStudent(learnerId);
     } catch (err) {
       console.error('[Labour Page Load Error]', err);
       setError(err.message || 'Failed to load labour market data');
@@ -224,6 +234,7 @@ Round 4: Technical Bar Raiser & Engineering Leadership Review`,
   };
 
   const loadStudent = async (studentId) => {
+    if (role === 'student' && studentId !== userId) return;
     try {
       const ev = await api.getStudentEvidence(studentId);
       setStudentEvidence(ev);
@@ -236,7 +247,7 @@ Round 4: Technical Bar Raiser & Engineering Leadership Review`,
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [userId, role]);
 
   // ── Preset Loaders for each signal type ──
   const handleLoadJdPreset = (presetKey) => {
@@ -666,37 +677,6 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
     }
   };
 
-  const handleSimulateVerification = async (skillId) => {
-    setLoading(true);
-    try {
-      await api.recordCompetencyEvidence({
-        learner_id: selectedStudentId,
-        skill_id: skillId,
-        role_id: 'software-engineering-intern',
-        project_id: 'proj_demo_rest_api',
-        evidence_type: 'ide_validation',
-        evidence_location: 'workspace/proj_demo_rest_api/Dockerfile',
-        evidence_payload: {
-          docker_build: 'SUCCESS (Alpine multi-stage, 48MB)',
-          container_status: 'RUNNING (port 3000:3000)',
-          health_check: 'HTTP 200 OK (GET /health probe passed)',
-          test_coverage: '94% statement coverage',
-          qa_score: 0.96,
-          verified_by: 'SOCRATES QA Critic + Prof. Sarah Williams (Mentor)'
-        },
-        reviewer_id: 'demo_mentor'
-      });
-      notify(`Competency "${skillId.toUpperCase()}" verified via I.D.E. execution & QA validation!`);
-      await loadStudent(selectedStudentId);
-      await loadData();
-      setActiveTab('evidence');
-    } catch (err) {
-      alert('Verification failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleOpenEmployerFeedback = (candidate) => {
     setSelectedCandidate(candidate);
     setFeedbackForm({
@@ -736,6 +716,9 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
     }
   };
 
+  const isReviewer = ['mentor', 'admin', 'university'].includes(role);
+  const canViewCandidates = role === 'admin';
+
   const renderStatusBadge = (status) => {
     switch (status) {
       case 'VERIFIED':
@@ -765,12 +748,12 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button 
+            {isReviewer && <button 
               onClick={loadData}
               style={{ background: 'var(--bg-o)', border: '1px solid var(--border)', color: 'var(--tx-m)', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <RefreshCw size={13} /> Refresh
-            </button>
+            </button>}
             <button 
               onClick={() => navigate('/ide')}
               style={{ background: 'linear-gradient(180deg, #238636 0%, #2ea043 100%)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
@@ -797,7 +780,12 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
           { id: 'evidence', label: '4. Competency Evidence Store', icon: ShieldCheck },
           { id: 'employer', label: '5. Employer View & Feedback Loop', icon: Users },
           { id: 'institution', label: '6. Institutional Analytics', icon: BookOpen },
-        ].map(t => {
+        ].filter(t => {
+          if (t.id === 'signals' || t.id === 'matrix') return isReviewer;
+          if (t.id === 'employer') return canViewCandidates;
+          if (t.id === 'institution') return ['admin', 'university'].includes(role);
+          return true;
+        }).map(t => {
           const Icon = t.icon;
           const active = activeTab === t.id;
           return (
@@ -847,7 +835,7 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/* TAB 1: INDUSTRY SIGNALS & JD INGESTION */}
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'signals' && !loading && (
+      {activeTab === 'signals' && isReviewer && !loading && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: 20 }}>
           {/* Signal Ingestion Container */}
           <div style={{ background: 'var(--bg-d)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
@@ -1680,13 +1668,13 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
           <div style={{ background: 'var(--bg-d)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>🎓 Student Evidence Profile</h3>
-              <select
+              {isReviewer && <select
                 value={selectedStudentId}
                 onChange={e => { setSelectedStudentId(e.target.value); loadStudent(e.target.value); }}
                 style={{ background: 'var(--bg-o)', border: '1px solid var(--border)', color: 'var(--tx)', padding: '4px 8px', borderRadius: 6, fontSize: 12 }}
               >
-                <option value="demo_student">Alex Johnson (demo_student)</option>
-              </select>
+                {studentOptions.map(student => <option key={student.id} value={student.id}>{student.name} ({student.skill_level || 'student'})</option>)}
+              </select>}
             </div>
 
             {studentEvidence && (
@@ -1711,12 +1699,12 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {renderStatusBadge(cp.status)}
-                        <button
+                        {isReviewer && <button
                           onClick={() => handleEvaluateGap(cp.skill_id)}
                           style={{ background: 'rgba(88,166,255,0.15)', border: '1px solid rgba(88,166,255,0.3)', color: '#58a6ff', padding: '3px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer' }}
                         >
                           Run Gap Check
-                        </button>
+                        </button>}
                       </div>
                     </div>
                   ))}
@@ -1780,18 +1768,12 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
                     </div>
 
                     <div style={{ display: 'flex', gap: 10 }}>
-                      <button
+                      {isReviewer && <button
                         onClick={handleApplyUpgrade}
                         style={{ background: '#238636', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                       >
                         Apply Upgrade to Project
-                      </button>
-                      <button
-                        onClick={() => handleSimulateVerification(gapResult.skill_id)}
-                        style={{ background: '#1f6feb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Execute & Verify in I.D.E. (Pass QA & Record Evidence)
-                      </button>
+                      </button>}
                     </div>
                   </div>
                 )}
@@ -1852,7 +1834,7 @@ ${hiringDriveFormState.raw_content ? `### Additional Details:\n${hiringDriveForm
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/* TAB 5: EMPLOYER VIEW & CLOSED-LOOP FEEDBACK */}
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'employer' && !loading && (
+      {activeTab === 'employer' && canViewCandidates && !loading && (
         <div style={{ background: 'var(--bg-d)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>

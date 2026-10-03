@@ -54,3 +54,4 @@ data/
 
 # Export script
 export_codebase.js
+.vercel

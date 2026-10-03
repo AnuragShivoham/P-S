@@ -1,0 +1,48 @@
+# Render Blueprint for a Free-tier SOCRATES backend.
+# Free instances have ephemeral storage; SQLite data, uploads, and workspaces
+# are lost on restarts, idle spin-down, and redeploys. Use paid storage for
+# persistent application data. Enter secrets in Render, never in this file.
+services:
+  - type: web
+    name: socrates-backend
+    runtime: docker
+    branch: feature/labour-intelligence
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /app/data/socrates.db
+      - key: WORKSPACE_PATH
+        value: /app/data/workspace
+      - key: FRONTEND_URL
+        value: https://p-s-khaki.vercel.app
+      - key: ALLOW_VERCEL_PREVIEWS
+        value: "false"
+      - key: ENABLE_TERMINAL
+        value: "false"
+      - key: ENABLE_DEMO_SEED_DATA
+        value: "false"
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false

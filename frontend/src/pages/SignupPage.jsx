@@ -159,7 +159,7 @@ export default function SignupPage() {
                 <div style={{ marginTop: 24, marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
                   <GoogleLogin
                     onSuccess={handleGoogleSuccess}
-                    onError={() => setError('Google Sign Up Failed')}
+                    onError={() => setError('Google sign-up is blocked. Add https://p-s-khaki.vercel.app and http://localhost:5173 to the Google OAuth Authorized JavaScript origins in Google Cloud Console.')}
                     theme="filled_black"
                     shape="pill"
                     width="380"

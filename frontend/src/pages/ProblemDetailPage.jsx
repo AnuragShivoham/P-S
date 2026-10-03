@@ -7,6 +7,7 @@ import {
   ExternalLink, FileText, ChevronRight, RefreshCw, ThumbsUp 
 } from 'lucide-react';
 import { api } from '../api/client';
+import { getMediaUrl } from '../api/config';
 import { useStore } from '../store';
 
 const URGENCY_STYLES = {
@@ -607,13 +608,13 @@ export default function ProblemDetailPage() {
                 <div key={idx} style={styles.mediaCard}>
                   {m.media_type === 'video' ? (
                     <video 
-                      src={`/api/v1/media/${m.id}`} 
+                      src={getMediaUrl(m.id)} 
                       controls 
                       style={styles.mediaItem} 
                     />
                   ) : (
                     <img 
-                      src={`/api/v1/media/${m.id}`} 
+                      src={getMediaUrl(m.id)} 
                       alt={m.caption || 'Evidence photo'} 
                       style={styles.mediaItem} 
                     />

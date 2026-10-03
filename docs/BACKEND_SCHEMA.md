@@ -1,5 +1,8 @@
 # Backend Database Schema & Data Shapes — SOCRATES
 
+> **Source Code & Reference Branch:** [`feature/labour-intelligence`](https://github.com/AnuragShivoham/P-S/tree/feature/labour-intelligence)  
+> The full production Labour-Market Intelligence schema is implemented in [`backend/src/db/labour_schema.js`](file:///c:/Project-Skill/P-S/backend/src/db/labour_schema.js).
+
 All persistence in SOCRATES is managed via SQLite using Node.js built-in `node:sqlite` (`DatabaseSync`) with Write-Ahead Logging (WAL) and foreign keys enabled.
 
 ```sql
@@ -296,91 +299,202 @@ CREATE TABLE IF NOT EXISTS project_impact_metrics (
 
 ## 3. Labour-Market Intelligence & Competency Alignment Entities
 
-### `industry_signals` & `skill_ontology`
-Raw job signals and canonical dictionary for alias resolution.
+> **Branch:** [`feature/labour-intelligence`](https://github.com/AnuragShivoham/P-S/tree/feature/labour-intelligence)  
+> **Schema Source:** [`backend/src/db/labour_schema.js`](file:///c:/Project-Skill/P-S/backend/src/db/labour_schema.js)
+
+### `industry_signals` — Industry Signal Layer
+Ingested raw signals from JDs, internships, employer forms, expert consultations, and placement outcomes.
 ```sql
 CREATE TABLE IF NOT EXISTS industry_signals (
   id TEXT PRIMARY KEY,
-  source_type TEXT NOT NULL,           -- job_posting, curriculum, internship
-  company_or_institution TEXT NOT NULL,
-  job_title TEXT NOT NULL,
-  raw_text TEXT NOT NULL,
+  source_type TEXT NOT NULL,  -- 'job_description', 'internship', 'employer_form',
+                              -- 'expert_input', 'hiring_drive', 'placement_outcome'
+  source_name TEXT NOT NULL,
+  source_url TEXT,
+  organization TEXT,
+  role_title TEXT,
   location TEXT,
-  experience_level TEXT,               -- entry, mid, senior
-  ingested_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS skill_ontology (
-  id TEXT PRIMARY KEY,
-  canonical_name TEXT UNIQUE NOT NULL, -- e.g. "docker", "react", "postgresql"
-  category TEXT NOT NULL,              -- language, framework, database, tool, concept
-  aliases TEXT NOT NULL                -- JSON array: ["docker-compose", "containerization"]
+  published_at TEXT,
+  collected_at TEXT DEFAULT (datetime('now')),
+  raw_content TEXT NOT NULL,
+  parsed_content TEXT,        -- JSON: sections, detected skills, confidence scores
+  status TEXT DEFAULT 'pending', -- 'pending', 'processed', 'reviewed', 'archived'
+  created_by TEXT REFERENCES users(id),
+  created_at TEXT DEFAULT (datetime('now'))
 );
 ```
 
-### `requirement_matrix`
-Reviewed and approved role-to-skill mappings with market recurrence weighting.
+### `roles_ontology` — Canonical Role Hierarchy
 ```sql
-CREATE TABLE IF NOT EXISTS requirement_matrix (
-  id TEXT PRIMARY KEY,
-  role_title TEXT NOT NULL,            -- e.g. "Backend Engineer"
-  canonical_skill TEXT NOT NULL,
-  min_experience_years INTEGER DEFAULT 0,
-  recurrence_count INTEGER DEFAULT 1,
-  importance_weight REAL DEFAULT 1.0,  -- 0.0 - 5.0
-  is_human_reviewed INTEGER DEFAULT 0, -- 0 = raw, 1 = faculty/expert approved
-  reviewed_by TEXT REFERENCES users(id),
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(role_title, canonical_skill)
+CREATE TABLE IF NOT EXISTS roles_ontology (
+  id TEXT PRIMARY KEY,        -- e.g. 'software-engineering-intern', 'backend-engineer'
+  title TEXT NOT NULL,
+  category TEXT DEFAULT 'Engineering',
+  description TEXT,
+  parent_role_id TEXT REFERENCES roles_ontology(id),
+  version INTEGER DEFAULT 1,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 ```
 
-### `student_competencies` & `project_upgrades`
-Tracks student gap statuses and generated upgrade roadmaps.
+### `skills_ontology` — Canonical Skill Taxonomy
 ```sql
-CREATE TABLE IF NOT EXISTS student_competencies (
+CREATE TABLE IF NOT EXISTS skills_ontology (
+  id TEXT PRIMARY KEY,        -- e.g. 'docker', 'oop', 'dsa', 'rest-api', 'observability'
+  name TEXT NOT NULL,
+  category TEXT DEFAULT 'Core Engineering',
+  description TEXT,
+  proficiency_definitions TEXT, -- JSON: { beginner: "...", intermediate: "...", advanced: "..." }
+  version INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+### `skill_aliases` — Alias Resolution Table
+Maps arbitrary skill phrases to canonical skill IDs (e.g. `"Dockerfiles"` → `docker`).
+```sql
+CREATE TABLE IF NOT EXISTS skill_aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id TEXT NOT NULL REFERENCES skills_ontology(id) ON DELETE CASCADE,
+  alias TEXT UNIQUE NOT NULL
+);
+```
+
+### `skill_relationships` — Ontology Hierarchy & Prerequisites
+```sql
+CREATE TABLE IF NOT EXISTS skill_relationships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_skill_id TEXT NOT NULL REFERENCES skills_ontology(id) ON DELETE CASCADE,
+  child_skill_id TEXT NOT NULL REFERENCES skills_ontology(id) ON DELETE CASCADE,
+  relationship_type TEXT DEFAULT 'contains'  -- 'contains', 'prerequisite', 'related'
+);
+```
+
+### `labour_requirements` — Multi-Signal Requirement Matrix
+Aggregates market demand signals across JDs, internships, employers, and expert reviews.
+```sql
+CREATE TABLE IF NOT EXISTS labour_requirements (
+  id TEXT PRIMARY KEY,
+  signal_id TEXT REFERENCES industry_signals(id) ON DELETE SET NULL,
+  role_id TEXT NOT NULL REFERENCES roles_ontology(id),
+  skill_id TEXT NOT NULL REFERENCES skills_ontology(id),
+  requirement_type TEXT DEFAULT 'required',    -- 'required', 'preferred', 'nice_to_have'
+  proficiency TEXT DEFAULT 'intermediate',     -- 'beginner', 'intermediate', 'advanced'
+  experience_years REAL DEFAULT 0,
+  source_reference TEXT,
+  evidence_quote TEXT,
+  extraction_method TEXT DEFAULT 'deterministic', -- 'deterministic', 'nlp', 'llm', 'manual'
+  confidence REAL DEFAULT 1.0,
+  status TEXT DEFAULT 'OBSERVED',             -- 'OBSERVED', 'EMERGING', 'REVIEW_REQUIRED',
+                                              -- 'EXPERT_VALIDATED', 'APPROVED', 'DECLINING', 'REJECTED'
+  job_signal_count INTEGER DEFAULT 1,
+  internship_signal_count INTEGER DEFAULT 0,
+  employer_signal_count INTEGER DEFAULT 0,
+  expert_signal_count INTEGER DEFAULT 0,
+  trend_score REAL DEFAULT 0.0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+### `requirement_reviews` — Human Validation & Review Log
+Audit trail of expert faculty and employer review decisions.
+```sql
+CREATE TABLE IF NOT EXISTS requirement_reviews (
+  id TEXT PRIMARY KEY,
+  requirement_id TEXT NOT NULL REFERENCES labour_requirements(id) ON DELETE CASCADE,
+  reviewer_id TEXT NOT NULL REFERENCES users(id),
+  reviewer_role TEXT NOT NULL,    -- 'expert', 'employer', 'mentor', 'institution', 'admin'
+  decision TEXT NOT NULL,        -- 'APPROVE', 'MODIFY', 'REJECT', 'REQUEST_MORE_EVIDENCE'
+  comments TEXT,
+  suggested_proficiency TEXT,
+  suggested_learning_outcomes TEXT,    -- JSON array
+  suggested_evidence_requirements TEXT, -- JSON array
+  suggested_project_context TEXT,
+  version INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+### `student_competency_profiles` — Multi-Tier Student Evidence
+Tracks per-student, per-skill evidence states across four verified tiers.
+```sql
+CREATE TABLE IF NOT EXISTS student_competency_profiles (
   id TEXT PRIMARY KEY,
   student_id TEXT NOT NULL REFERENCES users(id),
-  target_role TEXT NOT NULL,
-  canonical_skill TEXT NOT NULL,
-  status TEXT DEFAULT 'MISSING',       -- MISSING, IN_PROGRESS, VERIFIED
-  last_evaluated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(student_id, target_role, canonical_skill)
+  skill_id TEXT NOT NULL REFERENCES skills_ontology(id),
+  status TEXT DEFAULT 'CLAIMED',  -- 'CLAIMED', 'OBSERVED', 'ASSESSED', 'VERIFIED'
+  claimed_source TEXT,    -- e.g. 'CV / Resume'
+  observed_source TEXT,   -- e.g. 'GitHub Project Scan'
+  assessed_source TEXT,   -- e.g. 'Assessment Quiz Passed'
+  verified_source TEXT,   -- e.g. 'I.D.E. Build, Test & QA Validation + Mentor Review'
+  proficiency_level TEXT DEFAULT 'beginner',
+  confidence_score REAL DEFAULT 0.5,
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(student_id, skill_id)
 );
+```
 
+### `competency_evidence_store` — Immutable Verified Evidence Records
+Persistent store for all QA-verified evidence artifacts linked to IDE projects and test outputs.
+```sql
+CREATE TABLE IF NOT EXISTS competency_evidence_store (
+  id TEXT PRIMARY KEY,
+  learner_id TEXT NOT NULL REFERENCES users(id),
+  skill_id TEXT NOT NULL REFERENCES skills_ontology(id),
+  role_id TEXT REFERENCES roles_ontology(id),
+  project_id TEXT REFERENCES projects(id),
+  milestone_id TEXT REFERENCES milestones(id),
+  task_id TEXT REFERENCES tasks(id),
+  assessment_id TEXT,
+  evidence_type TEXT NOT NULL, -- 'source_code', 'test_results', 'execution_result',
+                               -- 'project_artifact', 'technical_explanation', 'ide_validation'
+  evidence_location TEXT,      -- File path, workspace URI, or Git commit hash
+  evidence_payload TEXT,       -- JSON: test output, coverage %, health probe logs, QA score, mentor notes
+  reviewer_id TEXT REFERENCES users(id),
+  rubric_version INTEGER DEFAULT 1,
+  competency_version INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'VERIFIED',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+### `project_upgrades` — Non-Destructive Project Upgrade Records
+Links targeted skill upgrade milestones to existing student projects without overwriting code.
+```sql
 CREATE TABLE IF NOT EXISTS project_upgrades (
   id TEXT PRIMARY KEY,
+  base_project_id TEXT NOT NULL REFERENCES projects(id),
   student_id TEXT NOT NULL REFERENCES users(id),
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  missing_skill TEXT NOT NULL,
-  upgrade_type TEXT NOT NULL,          -- UPGRADE_EXISTING_PROJECT, NEW_IDE_PROJECT
-  milestone_id TEXT REFERENCES milestones(id),
-  status TEXT DEFAULT 'pending',       -- pending, completed
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  target_skill_id TEXT NOT NULL REFERENCES skills_ontology(id),
+  target_requirement_id TEXT REFERENCES labour_requirements(id),
+  upgrade_title TEXT NOT NULL,
+  upgrade_milestone_id TEXT REFERENCES milestones(id),
+  status TEXT DEFAULT 'pending',   -- 'pending', 'in_progress', 'completed', 'verified'
+  generated_by TEXT DEFAULT 'AI_GAP_ENGINE',
+  created_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
 );
 ```
 
-### `competency_evidence` & `outcome_feedback`
-Cryptographic or verifiable artifacts demonstrating competency and loop-closure feedback.
+### `employer_feedback_records` — Closed-Loop Placement Outcome Feedback
+Captures employer interview and hiring outcomes, feeding back into the market signal demand counters.
 ```sql
-CREATE TABLE IF NOT EXISTS competency_evidence (
+CREATE TABLE IF NOT EXISTS employer_feedback_records (
   id TEXT PRIMARY KEY,
-  student_id TEXT NOT NULL REFERENCES users(id),
-  canonical_skill TEXT NOT NULL,
-  project_id TEXT REFERENCES projects(id),
-  task_id TEXT REFERENCES tasks(id),
-  evidence_type TEXT NOT NULL,         -- task_completion, code_artifact, git_commit
-  artifact_summary TEXT,
-  verified_by TEXT DEFAULT 'socrates_qa',
-  verified_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS outcome_feedback (
-  id TEXT PRIMARY KEY,
-  student_id TEXT NOT NULL REFERENCES users(id),
-  target_role TEXT NOT NULL,
-  outcome TEXT NOT NULL,               -- placed, shortlisted, interview_failed
-  feedback_notes TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  employer_id TEXT NOT NULL REFERENCES users(id),
+  candidate_id TEXT NOT NULL REFERENCES users(id),
+  role_id TEXT REFERENCES roles_ontology(id),
+  hiring_status TEXT NOT NULL,       -- 'hired', 'internship_completed', 'interviewed', 'rejected'
+  competency_feedback TEXT,          -- JSON: { skill_id: "employer comment" }
+  gap_notes TEXT,
+  readiness_rating INTEGER,          -- 1–5
+  communication_rating INTEGER,      -- 1–5
+  created_at TEXT DEFAULT (datetime('now'))
 );
 ```
+
+> **Test Coverage:** All 8 Labour Intelligence schema tables are exercised and verified in  
+> [`backend/tests/labour_intelligence_test.js`](file:///c:/Project-Skill/P-S/backend/tests/labour_intelligence_test.js) — **12/12 integration tests passing** on branch `feature/labour-intelligence`.

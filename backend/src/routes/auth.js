@@ -3,8 +3,35 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const db = require('../db/database');
 const config = require('../config');
+
+const authAttempts = new Map();
+function allowAuthAttempt(key, limit, windowMs) {
+  const now = Date.now();
+  const recent = (authAttempts.get(key) || []).filter(timestamp => now - timestamp < windowMs);
+  if (recent.length >= limit) {
+    authAttempts.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  authAttempts.set(key, recent);
+  return true;
+}
+
+function rateLimitAuth(action, { emailLimit, ipLimit, windowMs }) {
+  return (req, res, next) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const emailAllowed = !emailLimit || !email || allowAuthAttempt(`${action}:email:${email}`, emailLimit, windowMs);
+    const ipAllowed = !ipLimit || allowAuthAttempt(`${action}:ip:${ip}`, ipLimit, windowMs);
+    if (!emailAllowed || !ipAllowed) {
+      return res.status(429).json({ error: 'Too many authentication attempts. Please try again later.' });
+    }
+    next();
+  };
+}
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Auth Error]', e.message);
@@ -24,16 +51,9 @@ function upsertUser(email, name, extra = {}) {
   const normalizedEmail = String(email).toLowerCase();
   let user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
   
-  // Security Check: Only allow admin role if email is in whitelist
-  const ALLOWED_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
-  let targetRole = ALLOWED_ROLES.includes(extra.role) ? extra.role : 'student';
-  if (targetRole === 'admin') {
-    const isAdmin = config.ADMIN_EMAILS.includes(normalizedEmail);
-    if (!isAdmin) {
-      console.warn(`[Auth Security] Unauthorized admin attempt by ${normalizedEmail}`);
-      targetRole = user ? user.role : 'student'; // Fallback to current role or student
-    }
-  }
+  // Self-service signup can only create non-privileged accounts. Mentors,
+  // universities, and admins must be provisioned by an authenticated admin.
+  const targetRole = ['student', 'citizen'].includes(extra.role) ? extra.role : 'student';
 
   if (!user) {
     const id = uuidv4();
@@ -41,19 +61,8 @@ function upsertUser(email, name, extra = {}) {
       .run(id, normalizedEmail, name, targetRole, extra.google_id || null, extra.avatar || null);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   } else {
-    // Always update role if explicitly provided at login (supports role switching)
     const updates = [];
     const params = [];
-    const ALLOWED_SWITCHABLE_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
-    if (extra.role && ALLOWED_SWITCHABLE_ROLES.includes(extra.role)) {
-      // Check permission for switching to admin
-      if (extra.role === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
-        console.warn(`[Auth Security] User ${normalizedEmail} blocked from switching to ADMIN`);
-      } else {
-        updates.push('role=?');
-        params.push(extra.role);
-      }
-    }
     if (extra.google_id && !user.google_id) {
       updates.push('google_id=?', 'avatar=?');
       params.push(extra.google_id, extra.avatar || null);
@@ -81,7 +90,7 @@ function getTransporter() {
 }
 
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
-router.post('/send-otp', wrap(async (req, res) => {
+router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10, windowMs: 15 * 60 * 1000 }), wrap(async (req, res) => {
   const { email, action } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Valid email required' });
@@ -97,8 +106,8 @@ router.post('/send-otp', wrap(async (req, res) => {
     return res.status(409).json({ error: 'Account already exists. Please log in.' });
   }
 
-  let otp = String(Math.floor(100000 + Math.random() * 900000));
-  if (normalizedEmail === 'test@example.com') {
+  let otp = String(crypto.randomInt(100000, 1000000));
+  if (process.env.NODE_ENV !== 'production' && normalizedEmail === 'test@example.com') {
     otp = '123456';
   }
   
@@ -125,10 +134,9 @@ router.post('/send-otp', wrap(async (req, res) => {
     res.json({ success: true, message: 'OTP sent to ' + email });
   } catch (e) {
     console.error('[Auth] Email send failed:', e.message);
-    // In dev mode, log the OTP so the developer can see it
-    console.log(`\n[DEV ONLY] OTP for ${email}: ${otp}\n`);
-    
     if (process.env.NODE_ENV !== 'production') {
+      // In dev mode, log the OTP so the developer can see it
+      console.log(`\n[DEV ONLY] OTP for ${email}: ${otp}\n`);
       return res.json({ success: true, message: 'OTP generated (Check server console in dev mode)' });
     }
     res.status(500).json({ error: 'Failed to send email: ' + e.message });
@@ -148,7 +156,7 @@ function hydrateUser(user) {
 }
 
 // ─── POST /auth/verify-otp ────────────────────────────────────────────────────
-router.post('/verify-otp', wrap(async (req, res) => {
+router.post('/verify-otp', rateLimitAuth('verify-otp', { emailLimit: 5, ipLimit: 20, windowMs: 15 * 60 * 1000 }), wrap(async (req, res) => {
   const { email, otp, name, role, action } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
   const ALLOWED_OTP_ROLES = ['student', 'mentor', 'citizen', 'university'];
@@ -157,6 +165,9 @@ router.post('/verify-otp', wrap(async (req, res) => {
   }
   if (role && !ALLOWED_OTP_ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role specified.' });
+  }
+  if (action === 'signup' && ['mentor', 'university'].includes(role)) {
+    return res.status(403).json({ error: 'Mentor and university accounts must be provisioned by an administrator.' });
   }
 
   const now = new Date().toISOString();
@@ -171,6 +182,9 @@ router.post('/verify-otp', wrap(async (req, res) => {
 
   const normalizedEmail = email.toLowerCase();
   const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  if (!userExists && ['mentor', 'university'].includes(role)) {
+    return res.status(403).json({ error: 'Mentor and university accounts must be provisioned by an administrator.' });
+  }
 
   if (action === 'login' && !userExists) {
     return res.status(404).json({ error: 'Account not found. Please sign up first.' });
@@ -191,7 +205,7 @@ router.post('/verify-otp', wrap(async (req, res) => {
 }));
 
 // ─── POST /auth/admin-login ──────────────────────────────────────────────────
-router.post('/admin-login', wrap(async (req, res) => {
+router.post('/admin-login', rateLimitAuth('admin-login', { emailLimit: 5, ipLimit: 20, windowMs: 15 * 60 * 1000 }), wrap(async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = String(email || '').trim().toLowerCase();
 
@@ -205,7 +219,9 @@ router.post('/admin-login', wrap(async (req, res) => {
   }
 
   const rawUser = upsertUser(normalizedEmail, normalizedEmail.split('@')[0], { role: 'admin' });
-  const user = hydrateUser(rawUser);
+  db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(rawUser.id);
+  const adminUser = db.prepare('SELECT * FROM users WHERE id = ?').get(rawUser.id);
+  const user = hydrateUser(adminUser);
   const token = signToken(user);
   res.json({ token, user });
 }));
@@ -215,6 +231,9 @@ router.post('/admin-login', wrap(async (req, res) => {
 router.post('/google', wrap(async (req, res) => {
   const { credential, role } = req.body;
   if (!credential) return res.status(400).json({ error: 'credential required' });
+  if (process.env.NODE_ENV === 'production' && !config.GOOGLE_CLIENT_ID) {
+    return res.status(503).json({ error: 'Google sign-in is not configured for this deployment.' });
+  }
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
   }
@@ -267,8 +286,12 @@ router.post('/google', wrap(async (req, res) => {
     return res.status(401).json({ error: 'Token audience mismatch' });
   }
 
+  if (payload.email_verified === false) {
+    return res.status(401).json({ error: 'Google account email is not verified.' });
+  }
+
   const { email, name, sub: google_id, picture: avatar } = payload;
-  
+
   if (!email) {
     return res.status(401).json({ error: 'Google account missing email address.' });
   }
@@ -306,15 +329,18 @@ router.put('/role', wrap(async (req, res) => {
   catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
 
   const { role } = req.body;
-  if (!['student', 'mentor', 'admin'].includes(role)) return res.status(400).json({ error: 'role must be student, mentor, or admin' });
-
-  // Security Check for switching to admin
-  if (role === 'admin' && !config.ADMIN_EMAILS.includes(String(payload.email).toLowerCase())) {
-    return res.status(403).json({ error: 'Unauthorized: Your email is not whitelisted for Admin role' });
+  if (!['student', 'citizen'].includes(role)) {
+    return res.status(403).json({ error: 'Privileged roles must be assigned by an administrator.' });
   }
 
-  db.prepare('UPDATE users SET role=? WHERE id=?').run(role, payload.id);
-  const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id=?').get(payload.id));
+  const currentUser = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
+  if (!currentUser) return res.status(401).json({ error: 'User not found.' });
+  if (!['student', 'citizen'].includes(currentUser.role)) {
+    return res.status(403).json({ error: 'You cannot change a provisioned account role.' });
+  }
+
+  db.prepare('UPDATE users SET role=? WHERE id=?').run(role, currentUser.id);
+  const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id=?').get(currentUser.id));
   const newToken = signToken(user);
   res.json({ token: newToken, user });
 }));

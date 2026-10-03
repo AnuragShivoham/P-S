@@ -1,13 +1,36 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { RotateCw, ExternalLink, Globe, Layout, Maximize2 } from 'lucide-react';
+import { getPreviewUrl } from '../../api/config';
+import { api } from '../../api/client';
 
 export default function WebPreview({ projectId, initialUrl = '' }) {
     const [key, setKey] = useState(0);
     const [url, setUrl] = useState(initialUrl); // Subpath
-    
-    // Fallback to window.location.hostname to avoid localhost issues in some environments
-    const host = window.location.hostname;
-    const previewUrl = `http://${host}:3001/api/v1/preview/${projectId}/${url}`;
+    const [previewToken, setPreviewToken] = useState('');
+    const [previewError, setPreviewError] = useState('');
+
+    useEffect(() => {
+        let active = true;
+        const refreshPreviewToken = async () => {
+            try {
+                const result = await api.getProjectPreviewToken(projectId);
+                if (!active) return;
+                setPreviewToken(result.token);
+                setPreviewError('');
+                setKey(current => current + 1);
+            } catch (error) {
+                if (active) setPreviewError(error.message || 'Unable to authorize project preview.');
+            }
+        };
+        refreshPreviewToken();
+        const timer = window.setInterval(refreshPreviewToken, 4 * 60 * 1000);
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [projectId]);
+
+    const previewUrl = previewToken ? getPreviewUrl(projectId, url, previewToken) : '';
 
     const refresh = () => setKey(k => k + 1);
 

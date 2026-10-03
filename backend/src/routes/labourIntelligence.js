@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { userCanAccessProject } = require('../security/projectAccess');
 const {
   normalizeSkill,
   cleanAndSegmentText,
@@ -30,12 +31,52 @@ const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   res.status(500).json({ error: e.message });
 });
 
+const requireAuth = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  next();
+};
+
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (!roles.includes(String(req.user.role || '').toLowerCase())) {
+    return res.status(403).json({ error: 'Insufficient permissions.' });
+  }
+  next();
+};
+
+const requireStudentOrStaff = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.user.id !== req.params.id && !['mentor', 'university', 'admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  next();
+};
+
+const requireEvidenceAccess = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const learnerId = req.query.learner_id;
+  if (['mentor', 'university', 'admin'].includes(req.user.role)) return next();
+  if (req.user.role === 'student' && (!learnerId || learnerId === req.user.id)) {
+    req.query.learner_id = req.user.id;
+    return next();
+  }
+  return res.status(403).json({ error: 'Access denied.' });
+};
+
+const requireProjectMember = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (!userCanAccessProject(req.user, req.params.id)) {
+    return res.status(404).json({ error: 'Project not found or access denied.' });
+  }
+  next();
+};
+
 // ══════════════════════════════════════════════════════════════════════
 // 1. INDUSTRY SIGNAL INGESTION & PROCESSING
 // ══════════════════════════════════════════════════════════════════════
 
 // Upload / Ingest a raw signal (JD, Internship, Employer Form, Expert Input)
-router.post('/signals/ingest', wrap(async (req, res) => {
+router.post('/signals/ingest', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const {
     source_type,
     source_name,
@@ -74,7 +115,7 @@ router.post('/signals/ingest', wrap(async (req, res) => {
 }));
 
 // List all industry signals
-router.get('/signals', wrap(async (req, res) => {
+router.get('/signals', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const signals = db.prepare(`
     SELECT s.*, u.name as created_by_name
     FROM industry_signals s
@@ -86,7 +127,7 @@ router.get('/signals', wrap(async (req, res) => {
 }));
 
 // Get specific industry signal by ID with parsed sections
-router.get('/signals/:id', wrap(async (req, res) => {
+router.get('/signals/:id', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const signal = db.prepare('SELECT * FROM industry_signals WHERE id = ?').get(req.params.id);
   if (!signal) return res.status(404).json({ error: 'Signal not found' });
 
@@ -166,7 +207,7 @@ router.get('/requirements', wrap(async (req, res) => {
 }));
 
 // Submit human expert review on a requirement (APPROVE, MODIFY, REJECT, REQUEST_MORE_EVIDENCE)
-router.post('/requirements/:id/review', wrap(async (req, res) => {
+router.post('/requirements/:id/review', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const requirementId = req.params.id;
   const {
     decision,
@@ -177,10 +218,14 @@ router.post('/requirements/:id/review', wrap(async (req, res) => {
     suggested_project_context
   } = req.body;
 
-  if (!decision) return res.status(400).json({ error: 'decision is required' });
+  const allowedDecisions = ['APPROVE', 'MODIFY', 'REJECT', 'REQUEST_MORE_EVIDENCE'];
+  if (!allowedDecisions.includes(decision)) return res.status(400).json({ error: 'A valid decision is required.' });
+  if (!db.prepare('SELECT id FROM labour_requirements WHERE id = ?').get(requirementId)) {
+    return res.status(404).json({ error: 'Requirement not found.' });
+  }
 
-  const reviewerId = req.user?.id || 'demo_expert';
-  const reviewerRole = req.user?.role || 'expert';
+  const reviewerId = req.user.id;
+  const reviewerRole = req.user.role;
 
   const reviewId = 'rev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
 
@@ -233,8 +278,19 @@ router.post('/requirements/:id/review', wrap(async (req, res) => {
 // 4. STUDENT READINESS & COMPETENCY GAP ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
+router.get('/students', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
+  const students = db.prepare(`
+    SELECT id, name, skill_level
+    FROM users
+    WHERE role = 'student'
+    ORDER BY name COLLATE NOCASE
+    LIMIT 500
+  `).all();
+  res.json({ students });
+}));
+
 // Get comprehensive student evidence and profiles
-router.get('/students/:id/evidence', wrap(async (req, res) => {
+router.get('/students/:id/evidence', requireStudentOrStaff, wrap(async (req, res) => {
   const studentId = req.params.id;
   const evidence = getStudentEvidence(studentId);
   if (!evidence) return res.status(404).json({ error: 'Student not found' });
@@ -242,7 +298,7 @@ router.get('/students/:id/evidence', wrap(async (req, res) => {
 }));
 
 // Evaluate gap for a student against a target competency
-router.post('/students/:id/gap-analysis', wrap(async (req, res) => {
+router.post('/students/:id/gap-analysis', requireStudentOrStaff, wrap(async (req, res) => {
   const studentId = req.params.id;
   const { skill_id, role_id } = req.body;
 
@@ -253,7 +309,7 @@ router.post('/students/:id/gap-analysis', wrap(async (req, res) => {
 }));
 
 // Generate upgrade plan for an existing project
-router.post('/projects/:id/upgrade-plan', wrap(async (req, res) => {
+router.post('/projects/:id/upgrade-plan', requireProjectMember, wrap(async (req, res) => {
   const projectId = req.params.id;
   const { target_skill_id, target_requirement_id } = req.body;
 
@@ -264,10 +320,15 @@ router.post('/projects/:id/upgrade-plan', wrap(async (req, res) => {
 }));
 
 // Apply upgrade plan to existing project (attaches milestone & tasks to database)
-router.post('/projects/:id/apply-upgrade', wrap(async (req, res) => {
+router.post('/projects/:id/apply-upgrade', requireAuth, wrap(async (req, res) => {
   const projectId = req.params.id;
   const { upgrade_plan, target_requirement_id } = req.body;
-  const studentId = req.user?.id || req.body.student_id || 'demo_student';
+  const project = db.prepare('SELECT user_id FROM projects WHERE id = ?').get(projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found.' });
+  if (project.user_id !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only the project owner can apply an upgrade.' });
+  }
+  const studentId = project.user_id;
 
   if (!upgrade_plan || !upgrade_plan.milestone) {
     return res.status(400).json({ error: 'Valid upgrade_plan is required' });
@@ -286,7 +347,7 @@ router.post('/projects/:id/apply-upgrade', wrap(async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 
 // List all verified evidence records
-router.get('/evidence', wrap(async (req, res) => {
+router.get('/evidence', requireEvidenceAccess, wrap(async (req, res) => {
   const learnerId = req.query.learner_id;
   const skillId = req.query.skill_id;
 
@@ -322,7 +383,7 @@ router.get('/evidence', wrap(async (req, res) => {
 }));
 
 // Record verified competency evidence (called upon I.D.E. execution / mentor QA)
-router.post('/evidence/record', wrap(async (req, res) => {
+router.post('/evidence/record', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const {
     learner_id,
     skill_id,
@@ -334,11 +395,17 @@ router.post('/evidence/record', wrap(async (req, res) => {
     evidence_type,
     evidence_location,
     evidence_payload,
-    reviewer_id
   } = req.body;
 
-  if (!learner_id || !skill_id) {
-    return res.status(400).json({ error: 'learner_id and skill_id are required' });
+  if (!learner_id || !skill_id || !project_id) {
+    return res.status(400).json({ error: 'learner_id, skill_id, and project_id are required' });
+  }
+
+  const learner = db.prepare('SELECT id, role FROM users WHERE id = ?').get(learner_id);
+  if (!learner || learner.role !== 'student') return res.status(404).json({ error: 'Student not found.' });
+  const project = db.prepare('SELECT user_id FROM projects WHERE id = ?').get(project_id);
+  if (!project || project.user_id !== learner_id || !userCanAccessProject(req.user, project_id)) {
+    return res.status(403).json({ error: 'Evidence project must belong to the learner and be accessible to you.' });
   }
 
   const result = recordVerifiedEvidence({
@@ -352,7 +419,7 @@ router.post('/evidence/record', wrap(async (req, res) => {
     evidence_type: evidence_type || 'ide_validation',
     evidence_location: evidence_location || 'workspace/repo',
     evidence_payload: evidence_payload || {},
-    reviewer_id: reviewer_id || req.user?.id || 'demo_mentor'
+    reviewer_id: req.user.id
   });
 
   res.json({
@@ -367,7 +434,7 @@ router.post('/evidence/record', wrap(async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 
 // Employer Candidate Explorer: returns candidates with verified competency evidence
-router.get('/employer/candidates', wrap(async (req, res) => {
+router.get('/employer/candidates', requireRole('admin'), wrap(async (req, res) => {
   const { role_id, required_skills } = req.query;
 
   const targetRole = role_id || 'software-engineering-intern';
@@ -417,7 +484,7 @@ router.get('/employer/candidates', wrap(async (req, res) => {
 }));
 
 // Submit Employer Outcome / Hiring Feedback -> closes the continuous loop
-router.post('/employer/feedback', wrap(async (req, res) => {
+router.post('/employer/feedback', requireRole('admin'), wrap(async (req, res) => {
   const {
     candidate_id,
     role_id,
@@ -428,11 +495,16 @@ router.post('/employer/feedback', wrap(async (req, res) => {
     communication_rating
   } = req.body;
 
-  const employerId = req.user?.id || 'demo_employer';
+  if (!candidate_id) return res.status(400).json({ error: 'candidate_id is required.' });
+  if (!db.prepare("SELECT id FROM users WHERE id = ? AND role = 'student'").get(candidate_id)) {
+    return res.status(404).json({ error: 'Candidate not found.' });
+  }
+
+  const employerId = req.user.id;
 
   const result = recordEmployerFeedback({
     employer_id: employerId,
-    candidate_id: candidate_id || 'demo_student',
+    candidate_id,
     role_id: role_id || 'software-engineering-intern',
     hiring_status: hiring_status || 'hired',
     competency_feedback: competency_feedback || {},
@@ -451,7 +523,7 @@ router.post('/employer/feedback', wrap(async (req, res) => {
 // 7. INSTITUTION ANALYTICS & CURRICULUM REVIEW CANDIDATES
 // ══════════════════════════════════════════════════════════════════════
 
-router.get('/institution/curriculum-analysis', wrap(async (req, res) => {
+router.get('/institution/curriculum-analysis', requireRole('university', 'admin'), wrap(async (req, res) => {
   // Aggregate demand across market requirements
   const highDemandSkills = db.prepare(`
     SELECT r.skill_id, s.name as skill_name, s.category as skill_category,

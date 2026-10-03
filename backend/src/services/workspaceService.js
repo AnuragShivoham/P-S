@@ -3,8 +3,34 @@
 const path = require('path');
 const fs = require('fs');
 const { v4: uuid } = require('uuid');
+const config = require('../config');
+const BASE_WORKSPACE = config.WORKSPACE_PATH;
 
-const BASE_WORKSPACE = process.env.WORKSPACE_PATH || './workspace';
+function isWithinDirectory(parentPath, candidatePath) {
+  const relativePath = path.relative(parentPath, candidatePath);
+  return relativePath === '' || (!relativePath.startsWith(`..${path.sep}`) && relativePath !== '..' && !path.isAbsolute(relativePath));
+}
+
+function assertNoSymlinkComponents(projectPath, targetPath) {
+  const relativePath = path.relative(projectPath, targetPath);
+  if (!isWithinDirectory(projectPath, targetPath)) {
+    throw new Error('Security Violation: Path escapes project workspace.');
+  }
+
+  let currentPath = projectPath;
+  const components = relativePath ? relativePath.split(path.sep) : [];
+  for (const component of components) {
+    currentPath = path.join(currentPath, component);
+    try {
+      if (fs.lstatSync(currentPath).isSymbolicLink()) {
+        throw new Error('Security Violation: Symbolic links are not allowed in project workspaces.');
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') break;
+      throw error;
+    }
+  }
+}
 
 /**
  * Workspace Service
@@ -16,7 +42,7 @@ class WorkspaceService {
    * Create workspace directory for project
    */
   static createProjectWorkspace(projectId) {
-    const projectPath = path.join(BASE_WORKSPACE, projectId);
+    const projectPath = this.getProjectPath(projectId);
     if (!fs.existsSync(projectPath)) {
       fs.mkdirSync(projectPath, { recursive: true });
     }
@@ -27,7 +53,7 @@ class WorkspaceService {
    * Delete entire project workspace directory
    */
   static deleteProjectWorkspace(projectId) {
-    const projectPath = path.join(BASE_WORKSPACE, projectId);
+    const projectPath = this.getProjectPath(projectId);
     if (fs.existsSync(projectPath)) {
       fs.rmSync(projectPath, { recursive: true, force: true });
     }
@@ -37,12 +63,23 @@ class WorkspaceService {
    * Get project workspace path with validation
    */
   static getProjectPath(projectId) {
+    if (typeof projectId !== 'string' || !projectId || projectId === '.' || projectId === '..' || /[\\/]/.test(projectId)) {
+      throw new Error('Invalid project ID');
+    }
     const projectPath = path.resolve(path.join(BASE_WORKSPACE, projectId));
     const basePath = path.resolve(BASE_WORKSPACE);
     
     // Prevent directory traversal
-    if (!projectPath.startsWith(basePath)) {
+    if (!isWithinDirectory(basePath, projectPath)) {
       throw new Error('Invalid project path');
+    }
+
+    try {
+      if (fs.lstatSync(projectPath).isSymbolicLink()) {
+        throw new Error('Security Violation: Project workspace cannot be a symbolic link.');
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
     }
     
     return projectPath;
@@ -62,11 +99,19 @@ class WorkspaceService {
     const projectPath = this.getProjectPath(projectId);
     const fullPath = path.resolve(path.join(projectPath, normalizedPath));
     
-    if (!fullPath.startsWith(projectPath)) {
+    if (!isWithinDirectory(projectPath, fullPath)) {
       throw new Error('Security Violation: Path traversal attempt detected.');
     }
+
+    assertNoSymlinkComponents(projectPath, fullPath);
     
     return fullPath;
+  }
+
+  static normalizeRelativePath(projectId, filePath) {
+    const projectPath = this.getProjectPath(projectId);
+    const fullPath = this.validateFilePath(projectId, filePath);
+    return path.relative(projectPath, fullPath).split(path.sep).join('/');
   }
 
   /**
@@ -219,8 +264,7 @@ class WorkspaceService {
     }
 
     const protectedPaths = ['src', 'backend', 'routes', 'services', 'db', 'package.json', '.env', ''];
-    let normalizedPath = filePath.replace(/^[\/\\]+/, '');
-    if (normalizedPath === '.') normalizedPath = '';
+    const normalizedPath = this.normalizeRelativePath(projectId, filePath).toLowerCase();
     
     const isProtected = normalizedPath === '' || protectedPaths.some(p => p !== '' && (normalizedPath === p || normalizedPath.startsWith(p + '/')));
     

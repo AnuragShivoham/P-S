@@ -135,3 +135,245 @@ All new endpoints follow the `/api/v1/...` REST convention with JWT Bearer authe
 
 ### `GET /api/v1/media/:id`
 - **Auth**: Stream media safely (handles byte ranges, MIME headers, caching).
+
+---
+
+## 4. Labour-Market Intelligence & Competency Alignment
+
+> **Source Code & Reference Branch:** [`feature/labour-intelligence`](https://github.com/AnuragShivoham/P-S/tree/feature/labour-intelligence)  
+> All endpoints are mounted at `/api/v1/labour` and implemented in [`backend/src/routes/labourIntelligence.js`](file:///c:/Project-Skill/P-S/backend/src/routes/labourIntelligence.js).
+
+### `POST /api/v1/labour/signals/ingest`
+- **Auth**: Authenticated (Admin, Faculty, Employer, Mentor)
+- **Request Body**:
+  ```json
+  {
+    "source_type": "job_description",
+    "source_name": "Microsoft SWE Intern 2026",
+    "source_url": "https://careers.microsoft.com/us/en/job/200041085",
+    "organization": "Microsoft",
+    "role_title": "Software Engineering Intern",
+    "location": "Redmond, WA",
+    "published_at": "2026-03-01T00:00:00Z",
+    "raw_content": "Qualifications: Experience with Docker containers, microservices..."
+  }
+  ```
+- **Response**: `201 Created`
+  ```json
+  {
+    "signal": {
+      "id": "sig_1710779400123",
+      "source_name": "Microsoft SWE Intern 2026",
+      "extracted_skills": ["docker", "oop", "dsa"],
+      "created_requirements": 3,
+      "status": "processed"
+    }
+  }
+  ```
+
+---
+
+### `GET /api/v1/labour/signals`
+- **Auth**: Authenticated
+- **Query Params**: `source_type`, `organization`, `status`, `limit`, `offset`
+- **Response**:
+  ```json
+  {
+    "signals": [
+      {
+        "id": "sig_1710779400123",
+        "source_name": "Microsoft SWE Intern 2026",
+        "organization": "Microsoft",
+        "role_title": "Software Engineering Intern",
+        "source_type": "job_description",
+        "status": "processed",
+        "extracted_skills_count": 3,
+        "created_at": "2026-03-01T10:00:00Z"
+      }
+    ],
+    "total": 14
+  }
+  ```
+
+---
+
+### `GET /api/v1/labour/ontology/skills`
+- **Auth**: Public / Authenticated
+- **Response**: List of canonical skills, categories, and proficiency definitions.
+  ```json
+  {
+    "skills": [
+      {
+        "id": "docker",
+        "name": "Docker & Containerization",
+        "category": "devops_infrastructure",
+        "aliases": ["Dockerfiles", "Docker Containerization", "docker-compose"],
+        "proficiency_definitions": {
+          "beginner": "Can write basic Dockerfile and run containers",
+          "intermediate": "Multi-stage builds, non-root users, healthchecks",
+          "advanced": "Optimized layering, minimal distroless base, vulnerability scanning"
+        }
+      }
+    ]
+  }
+  ```
+
+---
+
+### `POST /api/v1/labour/ontology/normalize`
+- **Auth**: Authenticated
+- **Request Body**: `{ "raw_text": "Production Docker Containerization & Health Probes" }`
+- **Response**:
+  ```json
+  {
+    "canonical_skill_id": "docker",
+    "canonical_name": "Docker & Containerization",
+    "matched_alias": "docker containerization",
+    "confidence": 0.98
+  }
+  ```
+
+---
+
+### `GET /api/v1/labour/requirements`
+- **Auth**: Authenticated
+- **Query Params**: `role_id`, `skill_id`, `status`, `search`, `limit`, `offset`
+- **Response**: Multi-signal requirement matrix with aggregation counters:
+  ```json
+  {
+    "requirements": [
+      {
+        "id": "req_doc_swe_2026",
+        "role_id": "software-engineering-intern",
+        "skill_id": "docker",
+        "skill_name": "Docker & Containerization",
+        "requirement_type": "preferred",
+        "proficiency": "intermediate",
+        "job_signal_count": 42,
+        "internship_signal_count": 18,
+        "employer_signal_count": 9,
+        "expert_signal_count": 4,
+        "trend_score": 8.7,
+        "status": "APPROVED"
+      }
+    ]
+  }
+  ```
+
+---
+
+### `POST /api/v1/labour/requirements/:id/review`
+- **Auth**: Faculty / Expert / Admin
+- **Request Body**:
+  ```json
+  {
+    "decision": "APPROVE",
+    "comments": "Essential industry skill for modern backend deployments.",
+    "suggested_proficiency": "intermediate",
+    "suggested_evidence_requirements": "Multi-stage Dockerfile, docker-compose.yml, container healthcheck endpoint passing in IDE terminal"
+  }
+  ```
+- **Response**: `200 OK` with review record and updated requirement status.
+
+---
+
+### `GET /api/v1/labour/students/:id/evidence`
+- **Auth**: Student (self) / Mentor / Faculty / Employer
+- **Response**: Multi-tier evidence profile breakdown:
+  ```json
+  {
+    "student_id": "usr_student_01",
+    "competencies": [
+      {
+        "skill_id": "docker",
+        "skill_name": "Docker & Containerization",
+        "status": "VERIFIED",
+        "proficiency_level": "intermediate",
+        "claimed_source": "Resume: 'Familiar with Docker'",
+        "observed_source": "GitHub repo: Dockerfile committed",
+        "assessed_source": "Quiz Score: 85%",
+        "verified_source": "SOCRATES Cloud IDE: Project proj_rest_api passed container healthcheck test suite",
+        "confidence_score": 0.96
+      }
+    ]
+  }
+  ```
+
+---
+
+### `POST /api/v1/labour/students/:id/gap-analysis`
+- **Auth**: Authenticated
+- **Request Body**: `{ "target_role_id": "software-engineering-intern", "target_skill_id": "docker" }`
+- **Response**:
+  ```json
+  {
+    "recommendation": "UPGRADE_EXISTING_PROJECT",
+    "base_project_id": "proj_rest_api_01",
+    "base_project_title": "Express REST API Microservice",
+    "target_skill": "docker",
+    "gap_reason": "Student possesses a working backend project but lacks verified containerization evidence."
+  }
+  ```
+
+---
+
+### `POST /api/v1/labour/projects/:id/upgrade-plan`
+- **Auth**: Authenticated
+- **Request Body**: `{ "target_skill_id": "docker", "target_requirement_id": "req_doc_swe_2026" }`
+- **Response**: Non-destructive upgrade preview containing new milestone and daily tasks.
+
+---
+
+### `POST /api/v1/labour/projects/:id/apply-upgrade`
+- **Auth**: Authenticated
+- **Request Body**: `{ "target_skill_id": "docker", "target_requirement_id": "req_doc_swe_2026" }`
+- **Response**: Injects the milestone & tasks into the active project in SQLite without modifying existing source code files.
+
+---
+
+### `POST /api/v1/labour/evidence/record`
+- **Auth**: System / Mentor / QA Critic
+- **Request Body**:
+  ```json
+  {
+    "learner_id": "usr_student_01",
+    "skill_id": "docker",
+    "project_id": "proj_rest_api_01",
+    "milestone_id": "m_docker_upgrade",
+    "evidence_type": "ide_validation",
+    "evidence_location": "workspace/proj_rest_api_01/Dockerfile",
+    "evidence_payload": {
+      "tests_passed": 4,
+      "coverage": 94,
+      "health_probe_status": 200,
+      "qa_critic_score": 9.5
+    }
+  }
+  ```
+- **Response**: Commits immutable evidence record and updates student competency status to `VERIFIED`.
+
+---
+
+### `GET /api/v1/labour/employer/candidates`
+- **Auth**: Employer / Admin
+- **Query Params**: `skill_id`, `role_id`, `status`
+- **Response**: Returns candidates with verifiable evidence payloads, project links, and test records.
+
+---
+
+### `POST /api/v1/labour/employer/feedback`
+- **Auth**: Employer
+- **Request Body**:
+  ```json
+  {
+    "candidate_id": "usr_student_01",
+    "role_id": "software-engineering-intern",
+    "hiring_status": "hired",
+    "readiness_rating": 5,
+    "competency_feedback": {
+      "docker": "Demonstrated excellent multi-stage Docker build comprehension in live technical round."
+    }
+  }
+  ```
+- **Response**: `200 OK` (increments employer signal counts and closes the feedback loop).
+

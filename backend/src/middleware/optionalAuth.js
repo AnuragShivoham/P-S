@@ -6,6 +6,7 @@ function optionalAuth(req, res, next) {
   if (req.method === 'OPTIONS') return next();
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader) return res.status(401).json({ error: 'Invalid authorization header' });
     req.user = null;
     return next();
   }
@@ -14,9 +15,10 @@ function optionalAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, config.JWT_SECRET);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
-    req.user = user || null;
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    req.user = user;
   } catch (e) {
-    req.user = null;
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
   next();
 }

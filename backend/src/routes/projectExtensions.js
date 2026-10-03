@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/database');
 const architectureGenerator = require('../engines/architectureGenerator');
+const { userCanAccessProject, userCanManageProject } = require('../security/projectAccess');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[ProjectExtensions Route Error]', e.message);
@@ -12,6 +13,41 @@ const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
 // ─────────────────────────────────────────────────────────────────────────────
 // ARCHITECTURE
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Authenticated project APIs require ownership, active team membership, or
+// explicit active-mentor assignment. Students may still apply to a project
+// and read their own application without already being a member.
+router.use('/:id', (req, res, next) => {
+  if (req.params.id === 'vscode') return next();
+  const routePath = req.path.replace(/\/+$/, '');
+  if (['/apply', '/my-application'].includes(routePath)) return next();
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (!userCanAccessProject(req.user, req.params.id)) {
+    return res.status(404).json({ error: 'Project not found or access denied.' });
+  }
+  next();
+});
+
+const requireProjectManager = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (!userCanManageProject(req.user, req.params.id)) {
+    return res.status(403).json({ error: 'Only the project owner, active mentor, or admin can manage this project.' });
+  }
+  next();
+};
+
+router.use('/:id/team/invite', requireProjectManager);
+router.use('/:id/team/member', requireProjectManager);
+router.use('/:id/applications', requireProjectManager);
+router.use('/:id/access-policy', requireProjectManager);
+router.use('/:id/collaboration/session', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  return requireProjectManager(req, res, next);
+});
+router.use('/:id/collaboration/session/:sessionId', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  return requireProjectManager(req, res, next);
+});
 
 router.get('/:id/architecture', wrap(async (req, res) => {
   const architectures = architectureGenerator.getProjectArchitectures(req.params.id);
@@ -51,13 +87,8 @@ router.post('/:id/architecture/approve', wrap(async (req, res) => {
 
 router.get('/:id/team', wrap(async (req, res) => {
   const projectId = req.params.id;
-  let team = db.prepare('SELECT * FROM project_teams WHERE project_id = ?').get(projectId);
-  if (!team) {
-    const teamId = `team_${uuidv4()}`;
-    db.prepare('INSERT INTO project_teams (id, project_id, name) VALUES (?, ?, ?)')
-      .run(teamId, projectId, 'Engineering Team');
-    team = db.prepare('SELECT * FROM project_teams WHERE id = ?').get(teamId);
-  }
+  const team = db.prepare('SELECT * FROM project_teams WHERE project_id = ?').get(projectId);
+  if (!team) return res.json({ team: null, members: [] });
 
   const members = db.prepare(`
     SELECT m.*, u.name, u.email, u.role as user_platform_role, u.avatar,
@@ -108,20 +139,31 @@ router.post('/:id/team/invite', wrap(async (req, res) => {
 router.patch('/:id/team/member/:memberId', wrap(async (req, res) => {
   const { memberId } = req.params;
   const { role, assigned_task_id, status } = req.body;
+  const team = db.prepare('SELECT id FROM project_teams WHERE project_id = ?').get(req.params.id);
+  if (!team) return res.status(404).json({ error: 'Project team not found.' });
 
   db.prepare(`
     UPDATE project_team_members SET
       role = COALESCE(?, role),
       assigned_task_id = COALESCE(?, assigned_task_id),
       status = COALESCE(?, status)
-    WHERE id = ?
-  `).run(role || null, assigned_task_id || null, status || null, memberId);
+    WHERE id = ? AND team_id = ?
+  `).run(role || null, assigned_task_id || null, status || null, memberId, team.id);
+
+  if (!db.prepare('SELECT changes() as count').get().count) {
+    return res.status(404).json({ error: 'Team member not found in this project.' });
+  }
 
   res.json({ success: true, message: 'Team member updated' });
 }));
 
 router.delete('/:id/team/member/:memberId', wrap(async (req, res) => {
-  db.prepare('DELETE FROM project_team_members WHERE id = ?').run(req.params.memberId);
+  const team = db.prepare('SELECT id FROM project_teams WHERE project_id = ?').get(req.params.id);
+  if (!team) return res.status(404).json({ error: 'Project team not found.' });
+  db.prepare('DELETE FROM project_team_members WHERE id = ? AND team_id = ?').run(req.params.memberId, team.id);
+  if (!db.prepare('SELECT changes() as count').get().count) {
+    return res.status(404).json({ error: 'Team member not found in this project.' });
+  }
   res.json({ success: true, message: 'Member removed from team' });
 }));
 
@@ -269,8 +311,12 @@ router.patch('/:id/collaboration/session/:sessionId', wrap(async (req, res) => {
       status = ?,
       live_share_url = COALESCE(?, live_share_url),
       ended_at = CASE WHEN ? = 'ended' THEN datetime('now') ELSE ended_at END
-    WHERE id = ?
-  `).run(status, live_share_url || null, status, sessionId);
+    WHERE id = ? AND project_id = ?
+  `).run(status, live_share_url || null, status, sessionId, req.params.id);
+
+  if (!db.prepare('SELECT changes() as count').get().count) {
+    return res.status(404).json({ error: 'Collaboration session not found.' });
+  }
 
   res.json({ success: true, message: 'Session updated' });
 }));
@@ -280,6 +326,10 @@ router.patch('/:id/collaboration/session/:sessionId', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/vscode/project/:id', wrap(async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (!userCanAccessProject(req.user, req.params.id)) {
+    return res.status(404).json({ error: 'Project not found or access denied.' });
+  }
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
@@ -334,7 +384,7 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
   const studentId = req.user.id;
   const { message = '' } = req.body;
 
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+  const project = db.prepare('SELECT id, user_id, course_id FROM projects WHERE id = ?').get(projectId);
   if (!project) return res.status(404).json({ error: 'Project not found.' });
 
   // Prevent duplicate application
@@ -347,6 +397,39 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
 
   // Check access policy
   const policy = db.prepare('SELECT * FROM project_access_policies WHERE project_id = ?').get(projectId);
+  if (policy) {
+    const accessMode = String(policy.access_mode || '').toLowerCase();
+    if (!['open', 'public', 'application', 'approval', 'restricted'].includes(accessMode)) {
+      return res.status(403).json({ error: 'This project is not accepting applications.' });
+    }
+    if (accessMode === 'restricted' || accessMode === 'approval') {
+      return res.status(403).json({ error: 'This project is restricted to invited collaborators.' });
+    }
+    if (policy.institution_id) {
+      return res.status(403).json({ error: 'Institution-restricted applications are unavailable until institutional membership verification is configured.' });
+    }
+    if (policy.course_id) {
+      const enrolled = db.prepare('SELECT 1 FROM projects WHERE user_id = ? AND course_id = ? LIMIT 1')
+        .get(studentId, policy.course_id);
+      if (!enrolled) return res.status(403).json({ error: 'You are not enrolled in the required course.' });
+    }
+    if (policy.max_team_size) {
+      const currentCount = db.prepare(`
+        SELECT COUNT(DISTINCT members.user_id) AS count
+        FROM (
+          SELECT user_id FROM projects WHERE id = ?
+          UNION
+          SELECT tm.user_id
+          FROM project_teams t
+          JOIN project_team_members tm ON tm.team_id = t.id AND tm.status = 'active'
+          WHERE t.project_id = ?
+        ) members
+      `).get(projectId, projectId).count;
+      if (currentCount >= policy.max_team_size) {
+        return res.status(409).json({ error: 'This project team has reached its maximum size.' });
+      }
+    }
+  }
   const autoApprove = !policy || policy.approval_required === 0;
 
   const result = db.prepare(`
@@ -354,12 +437,35 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
     VALUES (?, ?, ?, ?, datetime('now'))
   `).run(projectId, studentId, autoApprove ? 'approved' : 'pending', message);
 
+  if (autoApprove) {
+    let team = db.prepare('SELECT id FROM project_teams WHERE project_id = ?').get(projectId);
+    if (!team) {
+      const teamId = `team_${uuidv4()}`;
+      db.prepare('INSERT INTO project_teams (id, project_id, name) VALUES (?, ?, ?)')
+        .run(teamId, projectId, 'Solution Team');
+      team = { id: teamId };
+    }
+    const existingMember = db.prepare(`
+      SELECT tm.id
+      FROM project_team_members tm
+      JOIN project_teams t ON t.id = tm.team_id
+      WHERE t.project_id = ? AND tm.user_id = ? AND tm.status = 'active'
+      LIMIT 1
+    `).get(projectId, studentId);
+    if (!existingMember) {
+      db.prepare(`
+        INSERT INTO project_team_members (id, team_id, user_id, role, status, created_at)
+        VALUES (?, ?, ?, 'Student', 'active', datetime('now'))
+      `).run(`tm_${uuidv4()}`, team.id, studentId);
+    }
+  }
+
   res.status(201).json({
     applicationId: result.lastInsertRowid,
     status: autoApprove ? 'approved' : 'pending',
     message: autoApprove
-      ? 'Application approved automatically. You may now join the team.'
-      : 'Application submitted. Awaiting mentor review.'
+      ? 'Application approved automatically. You may now access the project.'
+      : 'Application submitted. Awaiting project-owner review.'
   });
 }));
 
@@ -391,8 +497,11 @@ router.patch('/:id/applications/:appId', requireRole('mentor', 'university', 'ad
   db.prepare(`
     UPDATE project_student_applications
     SET status = ?, reviewed_by = ?, reviewed_at = datetime('now')
-    WHERE id = ?
-  `).run(status, req.user.id, appId);
+    WHERE id = ? AND project_id = ?
+  `).run(status, req.user.id, appId, req.params.id);
+  if (!db.prepare('SELECT changes() as count').get().count) {
+    return res.status(404).json({ error: 'Application not found for this project.' });
+  }
   res.json({ success: true, status });
 }));
 

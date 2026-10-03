@@ -1,4 +1,6 @@
-const BASE = '/api/v1';
+import { getApiUrl } from './config';
+
+export const BASE = '/api/v1';
 async function req(method, path, body) {
   const token = localStorage.getItem('ab_token');
   const headers = { 'Content-Type': 'application/json' };
@@ -7,7 +9,7 @@ async function req(method, path, body) {
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   console.log(`[API] ${method} ${path}`, body || '');
-  const r = await fetch(`${BASE}${path}`, opts);
+  const r = await fetch(getApiUrl(`${BASE}${path}`), opts);
   
   let d = {};
   const contentType = r.headers.get('content-type');
@@ -85,6 +87,7 @@ export const api = {
   learningProcess: (payload) => post('/learning/process', payload),
 
   // Mentor Intervention Engine
+  getMentors: () => get('/mentors'),
   getMentorQueue: () => get('/mentor/queue'),
   getMentorSessionContext: (projectId) => get(`/session/context/${projectId}`),
   mentorJoinSession: (projectId) => post('/mentor/join', { projectId }),
@@ -194,6 +197,7 @@ export const api = {
   // Media APIs
   uploadMedia: (data) => post('/media/upload', data),
   getSignedUploadUrl: (data) => post('/media/signed-url', data),
+  getProjectPreviewToken: (projectId) => post(`/preview/${projectId}/token`),
 
   // Labour-Market Intelligence & Competency Alignment APIs
   ingestLabourSignal: (data) => post('/labour/signals/ingest', data),
@@ -210,6 +214,7 @@ export const api = {
   },
   submitRequirementReview: (id, data) => post(`/labour/requirements/${id}/review`, data),
   getStudentEvidence: (id) => get(`/labour/students/${id}/evidence`),
+  getLabourStudents: () => get('/labour/students'),
   evaluateStudentGap: (id, data) => post(`/labour/students/${id}/gap-analysis`, data),
   getProjectUpgradePlan: (projectId, data) => post(`/labour/projects/${projectId}/upgrade-plan`, data),
   applyProjectUpgrade: (projectId, data) => post(`/labour/projects/${projectId}/apply-upgrade`, data),

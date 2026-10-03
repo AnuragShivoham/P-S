@@ -341,6 +341,7 @@ function seedOntology(db) {
     console.log('[DB] Canonical Ontology successfully initialized.');
   }
 
+  if (process.env.ENABLE_DEMO_SEED_DATA === 'true') {
   // Seed Demo Industry Signal: Microsoft SWE Intern JD 200041085 (if not exists)
   const demoSignal = db.prepare('SELECT id FROM industry_signals WHERE id = ?').get('sig_msft_200041085');
   if (!demoSignal) {
@@ -527,6 +528,7 @@ Responsibilities & Core Engineering Expectations:
     );
 
     console.log('[DB] Demo student base project, profiles & verified evidence seeded.');
+  }
   }
 }
 

@@ -1,6 +1,8 @@
 const { WebSocket } = require('ws');
 const jwt = require('jsonwebtoken');
 const db = require('../db/database');
+const config = require('../config');
+const { userCanAccessProject } = require('../security/projectAccess');
 
 // Storage for active rooms
 // Key: projectId
@@ -103,19 +105,24 @@ const socketService = {
             }
 
             // 2. Auth & Role binding
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'socrates_secret_key');
+            const decoded = jwt.verify(token, config.JWT_SECRET);
             ws.userId = decoded.id;
             ws.projectId = projectId;
             ws.isAlive = true;
 
             // Fetch role from DB (Synchronous with DatabaseSync)
-            const user = db.prepare('SELECT role FROM users WHERE id = ?').get(ws.userId);
+            const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(ws.userId);
 
             if (!user) {
                 ws.close(4002, 'User not found');
                 return;
             }
             ws.role = user.role;
+
+            if (!userCanAccessProject(user, projectId)) {
+                ws.close(4003, 'Project access denied');
+                return;
+            }
 
             // 3. Room Management
             if (!rooms.has(projectId)) {
@@ -272,6 +279,12 @@ const socketService = {
             // Backpressure monitoring
             const bInterval = setInterval(() => {
                 if (ws.readyState !== WebSocket.OPEN) {
+                    clearInterval(bInterval);
+                    return;
+                }
+                const currentUser = db.prepare('SELECT id, role FROM users WHERE id = ?').get(ws.userId);
+                if (!currentUser || !userCanAccessProject(currentUser, projectId)) {
+                    ws.close(4003, 'Project access revoked');
                     clearInterval(bInterval);
                     return;
                 }

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/database');
 const mediaService = require('../services/mediaService');
@@ -151,12 +152,15 @@ router.get('/', wrap(async (req, res) => {
     district,
     urgency,
     severity,
-    status = 'PUBLISHED',
+    status: requestedStatus = 'PUBLISHED',
     search = '',
     sort = 'newest',
     page = 1,
     limit = 20
   } = req.query;
+
+  const mayBrowseUnpublished = req.user && ['admin', 'mentor', 'university'].includes(req.user.role);
+  const status = mayBrowseUnpublished ? requestedStatus : 'PUBLISHED';
 
   const conditions = [];
   const params = [];
@@ -392,6 +396,8 @@ router.post('/', requireRole('citizen', 'admin'), wrap(async (req, res) => {
 
   // Insert media references if provided
   if (Array.isArray(media) && media.length > 0) {
+    let submittedFileCount = 0;
+    let submittedBytes = 0;
     const insertMediaStmt = db.prepare(`
       INSERT INTO problem_media (
         id, problem_id, media_type, file_name, original_name,
@@ -417,6 +423,19 @@ router.post('/', requireRole('citizen', 'admin'), wrap(async (req, res) => {
           base64Data = parts[1];
         }
 
+        const currentUsage = db.prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM private_media_uploads WHERE owner_id = ?) +
+            (SELECT COUNT(*) FROM problem_media pm JOIN societal_problems sp ON sp.id = pm.problem_id WHERE sp.user_id = ?) AS file_count,
+            (SELECT COALESCE(SUM(size_bytes), 0) FROM private_media_uploads WHERE owner_id = ?) +
+            (SELECT COALESCE(SUM(pm.size_bytes), 0) FROM problem_media pm JOIN societal_problems sp ON sp.id = pm.problem_id WHERE sp.user_id = ?) AS total_bytes
+        `).get(req.user.id, req.user.id, req.user.id, req.user.id);
+        const incomingBytes = Buffer.from(base64Data, 'base64').length;
+        if (currentUsage.file_count + submittedFileCount >= 100 ||
+            currentUsage.total_bytes + submittedBytes + incomingBytes > 250 * 1024 * 1024) {
+          return res.status(429).json({ error: 'Upload quota reached for this account.' });
+        }
+
         try {
           const saved = mediaService.saveMedia({
             originalName,
@@ -429,10 +448,25 @@ router.post('/', requireRole('citizen', 'admin'), wrap(async (req, res) => {
           mimeType = saved.mimeType;
           sizeBytes = saved.sizeBytes;
           storagePath = saved.storagePath;
+          submittedFileCount += 1;
+          submittedBytes += saved.sizeBytes;
         } catch (err) {
           console.warn('[Problems] Media save skipped:', err.message);
           continue;
         }
+      } else {
+        const safeFileName = path.basename(String(fileName));
+        const ownedUpload = db.prepare(`
+          SELECT file_name, size_bytes
+          FROM private_media_uploads
+          WHERE file_name = ? AND owner_id = ?
+        `).get(safeFileName, req.user.id);
+        if (!ownedUpload) {
+          return res.status(403).json({ error: 'Media attachments must be uploaded by the signed-in user.' });
+        }
+        fileName = ownedUpload.file_name;
+        storagePath = ownedUpload.file_name;
+        sizeBytes = ownedUpload.size_bytes;
       }
 
       insertMediaStmt.run(
@@ -445,6 +479,10 @@ router.post('/', requireRole('citizen', 'admin'), wrap(async (req, res) => {
         sizeBytes,
         storagePath
       );
+      if (!rawPayload) {
+        db.prepare('DELETE FROM private_media_uploads WHERE file_name = ? AND owner_id = ?')
+          .run(fileName, req.user.id);
+      }
     }
   }
 
@@ -478,6 +516,13 @@ router.get('/:id', wrap(async (req, res) => {
   `).get(problemId);
 
   if (!problem) {
+    return res.status(404).json({ error: 'Problem not found.' });
+  }
+
+  const mayViewUnpublished = req.user && (
+    req.user.id === problem.user_id || ['admin', 'mentor', 'university'].includes(req.user.role)
+  );
+  if (!['PUBLISHED', 'ADOPTED'].includes(problem.status) && !mayViewUnpublished) {
     return res.status(404).json({ error: 'Problem not found.' });
   }
 
@@ -579,9 +624,9 @@ router.patch('/:id', requireRole('citizen', 'admin', 'mentor', 'university'), wr
     people_affected = problem.people_affected,
     geographic_scope = problem.geographic_scope,
     privacy_level = problem.privacy_level,
-    expected_impact = problem.expected_impact,
-    status = problem.status
+    expected_impact = problem.expected_impact
   } = req.body;
+  const status = problem.status;
 
   db.prepare(`
     UPDATE societal_problems SET
@@ -629,7 +674,7 @@ router.delete('/:id', requireRole('citizen', 'admin'), wrap(async (req, res) => 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /:id/analyze — Trigger or re-run AI problem intelligence
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/:id/analyze', wrap(async (req, res) => {
+router.post('/:id/analyze', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const problemIntelligence = require('../engines/problemIntelligence');
   const result = await problemIntelligence.analyzeProblem(req.params.id);
   res.json({
@@ -686,6 +731,10 @@ router.post('/:id/publish', wrap(async (req, res) => {
   const problemId = req.params.id;
   const problem = db.prepare('SELECT * FROM societal_problems WHERE id = ?').get(problemId);
   if (!problem) return res.status(404).json({ error: 'Problem not found' });
+
+  if (problem.status !== 'APPROVED') {
+    return res.status(409).json({ error: 'Only approved problems can be published to the marketplace.' });
+  }
 
   db.prepare("UPDATE societal_problems SET status = 'PUBLISHED', updated_at = datetime('now') WHERE id = ?")
     .run(problemId);
@@ -804,8 +853,9 @@ router.patch('/:id/ai-categories/:catId', requireRole('mentor', 'university', 'a
     updateFields.push('category_id = ?');
     params.push(category_id);
   }
-  params.push(catId);
-  db.prepare(`UPDATE problem_ai_categories SET ${updateFields.join(', ')} WHERE id = ?`).run(...params);
+  params.push(catId, req.params.id);
+  const result = db.prepare(`UPDATE problem_ai_categories SET ${updateFields.join(', ')} WHERE id = ? AND problem_id = ?`).run(...params);
+  if (!result.changes) return res.status(404).json({ error: 'AI category suggestion not found for this problem.' });
   res.json({ success: true, status });
 }));
 

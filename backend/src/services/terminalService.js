@@ -5,26 +5,9 @@ const { v4: uuid } = require('uuid');
 const db = require('../db/database');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const { userCanAccessProject } = require('../security/projectAccess');
 const { v4: uuidv4 } = require('uuid');
 
-// In-memory project authorizations (Reset on server restart for security)
-const projectAuthorizations = new Map(); // projectId -> Set of keyword strings
-
-/**
- * Grants temporary permission for a specific command keyword
- */
-function authorizeCommand(projectId, keyword) {
-  if (!projectAuthorizations.has(projectId)) {
-    projectAuthorizations.set(projectId, new Set());
-  }
-  projectAuthorizations.get(projectId).add(keyword.toLowerCase());
-  
-  // Auto-expire after 10 minutes
-  setTimeout(() => {
-    const auths = projectAuthorizations.get(projectId);
-    if (auths) auths.delete(keyword.toLowerCase());
-  }, 10 * 60 * 1000);
-}
 
 /**
  * Setup WebSocket terminal connections
@@ -49,8 +32,8 @@ function setupTerminalWS(wss, authenticate) {
       return;
     }
 
-    const project = db.prepare('SELECT user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== decoded.id) {
+    const user = db.prepare('SELECT id, role FROM users WHERE id = ?').get(decoded.id);
+    if (!user || !userCanAccessProject(user, projectId)) {
       ws.close(1008, 'Access denied or project not found');
       return;
     }
@@ -62,7 +45,7 @@ function setupTerminalWS(wss, authenticate) {
       ? ['-NoLogo', '-ExecutionPolicy', 'Bypass'] 
       : [];
 
-    const BASE_WORKSPACE = process.env.WORKSPACE_PATH || path.join(__dirname, '../../../workspace');
+    const BASE_WORKSPACE = config.WORKSPACE_PATH;
     const workspacePath = path.resolve(path.join(BASE_WORKSPACE, projectId));
 
     const fs = require('fs');
@@ -100,13 +83,10 @@ function setupTerminalWS(wss, authenticate) {
             const isRisky = dangerousPatterns.some(p => cmd.includes(p));
             
             if (isRisky) {
-              const auths = projectAuthorizations.get(projectId);
-              const allowed = Array.from(auths || []).some(keyword => cmd.includes(keyword));
-              
-              if (!allowed) {
+              {
                 ws.send(JSON.stringify({ 
                     type: 'output', 
-                    data: '\r\n\x1b[31;1m[SECURITY BLOCK] This command is restricted. Please ask your AI Mentor: "Authorize [command]" to run destructive actions.\x1b[0m\r\n' 
+                    data: '\r\n\x1b[31;1m[SAFETY BLOCK] This command is blocked by the development terminal safety filter. This filter is not a security sandbox.\x1b[0m\r\n' 
                 }));
                 ptyProcess.write('\u0015'); // Ctrl+U to clear line
                 commandBuffer = '';
@@ -166,4 +146,4 @@ function setupTerminalWS(wss, authenticate) {
   });
 }
 
-module.exports = { setupTerminalWS, authorizeCommand };
+module.exports = { setupTerminalWS };

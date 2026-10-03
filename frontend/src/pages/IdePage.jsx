@@ -13,6 +13,7 @@ import {
     Monitor as MonitorIcon, Puzzle as PuzzleIcon, PanelLeft, Layout, ExternalLink, X, XCircle, Settings
 } from 'lucide-react';
 import { api } from '../api/client';
+import { getApiUrl, getWsUrl } from '../api/config';
 import { useStore } from '../store';
 import '@xterm/xterm/css/xterm.css';
 import ExplainModal from '../components/mentor/ExplainModal';
@@ -952,7 +953,7 @@ export default function IDE() {
         status('Preparing ZIP...');
         try {
             const headers = { 'Authorization': `Bearer ${token}` };
-            const res = await fetch(`http://localhost:3000/api/v1/fs/download/${project.id}`, { headers });
+            const res = await fetch(getApiUrl(`/api/v1/fs/download/${project.id}`), { headers });
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1064,8 +1065,8 @@ export default function IDE() {
         termObjRef.current = term;
         fitAddonRef.current = fitAddon;
         if (!project?.id || !token) return;
-        const host = window.location.host.split(':')[0]; 
-        const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${host}:3001/api/v1/terminal?projectId=${project.id}&token=${token}`);
+        const wsUrl = getWsUrl('/api/v1/terminal', { projectId: project.id, token });
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         ws.onopen = () => {
             ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));

@@ -554,6 +554,13 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS private_media_uploads (
+    file_name TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS problem_locations (
     id TEXT PRIMARY KEY,
     problem_id TEXT NOT NULL REFERENCES societal_problems(id) ON DELETE CASCADE,
@@ -845,7 +852,9 @@ const personas = [
   ['demo_expert', 'expert@socrates.local', 'Dr. Elena Vance (Industry Expert)', 'expert', 'advanced'],
   ['demo_institution', 'institution@socrates.local', 'Engineering Academic Board', 'institution', 'advanced']
 ];
-personas.forEach(p => insertUser.run(...p));
+if (process.env.ENABLE_DEMO_SEED_DATA === 'true') {
+  personas.forEach(p => insertUser.run(...p));
+}
 
 const { initLabourSchema } = require('./labour_schema');
 initLabourSchema(db);

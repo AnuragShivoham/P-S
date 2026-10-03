@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test:security": "node tests/security_regression_test.js",
+    "test:labour": "node tests/labour_intelligence_test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
