@@ -8,6 +8,7 @@ const net = require('net');
 const tls = require('tls');
 const db = require('../db/database');
 const config = require('../config');
+const { sendWithFallback } = require('../services/emailDelivery');
 
 const authAttempts = new Map();
 function allowAuthAttempt(key, limit, windowMs) {
@@ -138,6 +139,9 @@ function getTransporter() {
     // Railway does not provide IPv6 egress. Connect explicitly over IPv4 while
     // preserving the SMTP hostname for TLS SNI and certificate validation.
     getSocket: connectSmtpOverIPv4,
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000,
     auth: { user: config.EMAIL_USER, pass: config.EMAIL_PASS },
   });
 }
@@ -174,9 +178,13 @@ router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10,
     .run(uuidv4(), normalizedEmail, otp, expiresAt);
 
   try {
-    const transporter = getTransporter();
-    await transporter.sendMail({
-      from: config.EMAIL_FROM,
+    const smtpTransporter = config.EMAIL_USER && config.EMAIL_PASS ? getTransporter() : null;
+    const provider = await sendWithFallback({
+      smtpTransporter,
+      smtpFrom: config.EMAIL_FROM,
+      resendApiKey: config.RESEND_API_KEY,
+      resendFrom: config.RESEND_FROM,
+      message: {
       to: normalizedEmail,
       subject: 'Your SOCRATES login code',
       html: `
@@ -187,10 +195,12 @@ router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10,
           <p style="color:#8b949e;font-size:12px">Expires in 10 minutes. Do not share this code.</p>
         </div>
       `,
+      }
     });
+    console.log(`[Auth] OTP email sent via ${provider}`);
     res.json({ success: true, message: 'OTP sent to ' + normalizedEmail });
   } catch (e) {
-    console.error('[Auth] Email send failed:', e.message);
+    console.error('[Auth] Email send failed:', e.code || e.message);
     if (process.env.NODE_ENV !== 'production') {
       // In dev mode, log the OTP so the developer can see it
       console.log(`\n[DEV ONLY] OTP for ${normalizedEmail}: ${otp}\n`);
