@@ -92,6 +92,10 @@ function getTransporter() {
     host: config.EMAIL_HOST,
     port: config.EMAIL_PORT,
     secure: config.EMAIL_PORT === 465,
+    // Railway containers may have no externally advertised IPv6 interface.
+    // Let Nodemailer resolve IPv4 too, so SMTP does not select an unreachable
+    // Gmail IPv6 address when the container's IPv4 egress is available.
+    allowInternalNetworkInterfaces: true,
     auth: { user: config.EMAIL_USER, pass: config.EMAIL_PASS },
   });
 }
