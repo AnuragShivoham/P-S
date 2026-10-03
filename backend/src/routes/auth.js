@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const net = require('net');
+const tls = require('tls');
 const db = require('../db/database');
 const config = require('../config');
 
@@ -84,6 +86,47 @@ function upsertUser(email, name, extra = {}) {
 }
 
 // ─── Email transporter  ───────────────────────────────────────────────────────
+function connectSmtpOverIPv4(options, callback) {
+  const host = options.host || config.EMAIL_HOST;
+  const port = Number(options.port || config.EMAIL_PORT);
+  const secure = Boolean(options.secure);
+  const socketOptions = {
+    host,
+    port,
+    family: 4,
+    ...(options.localAddress ? { localAddress: options.localAddress } : {})
+  };
+  const connection = secure
+    ? tls.connect({ ...socketOptions, servername: host })
+    : net.connect(socketOptions);
+  const connectEvent = secure ? 'secureConnect' : 'connect';
+  let settled = false;
+  const timeout = setTimeout(() => {
+    const error = new Error('SMTP IPv4 connection timed out');
+    error.code = 'ETIMEDOUT';
+    onError(error);
+  }, options.connectionTimeout || 30000);
+
+  const onError = error => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    connection.removeListener(connectEvent, onConnect);
+    connection.destroy();
+    callback(error);
+  };
+  const onConnect = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    connection.removeListener('error', onError);
+    callback(null, { connection, secured: secure });
+  };
+
+  connection.once('error', onError);
+  connection.once(connectEvent, onConnect);
+}
+
 function getTransporter() {
   if (!config.EMAIL_USER || !config.EMAIL_PASS) {
     console.warn('[Auth] EMAIL_USER / EMAIL_PASS not set – OTP emails will fail');
@@ -92,10 +135,9 @@ function getTransporter() {
     host: config.EMAIL_HOST,
     port: config.EMAIL_PORT,
     secure: config.EMAIL_PORT === 465,
-    // Railway containers may have no externally advertised IPv6 interface.
-    // Let Nodemailer resolve IPv4 too, so SMTP does not select an unreachable
-    // Gmail IPv6 address when the container's IPv4 egress is available.
-    allowInternalNetworkInterfaces: true,
+    // Railway does not provide IPv6 egress. Connect explicitly over IPv4 while
+    // preserving the SMTP hostname for TLS SNI and certificate validation.
+    getSocket: connectSmtpOverIPv4,
     auth: { user: config.EMAIL_USER, pass: config.EMAIL_PASS },
   });
 }
