@@ -33,6 +33,13 @@ function rateLimitAuth(action, { emailLimit, ipLimit, windowMs }) {
   };
 }
 
+function isAdminIdentity(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return false;
+  if (config.ADMIN_EMAILS.includes(normalizedEmail)) return true;
+  return Boolean(db.prepare("SELECT 1 FROM users WHERE email = ? AND role = 'admin'").get(normalizedEmail));
+}
+
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Auth Error]', e.message);
   res.status(500).json({ error: e.message });
@@ -92,17 +99,21 @@ function getTransporter() {
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
 router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10, windowMs: 15 * 60 * 1000 }), wrap(async (req, res) => {
   const { email, action } = req.body;
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     return res.status(400).json({ error: 'Valid email required' });
   }
 
-  const normalizedEmail = email.toLowerCase();
-  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  const existingUser = db.prepare('SELECT role FROM users WHERE email = ?').get(normalizedEmail);
 
-  if (action === 'login' && !userExists) {
+  if (isAdminIdentity(normalizedEmail)) {
+    return res.status(403).json({ error: 'Admin accounts must sign in using the Admin option and password.' });
+  }
+
+  if (action === 'login' && !existingUser) {
     return res.status(404).json({ error: 'Account not found. Please sign up first.' });
   }
-  if (action === 'signup' && userExists) {
+  if (action === 'signup' && existingUser) {
     return res.status(409).json({ error: 'Account already exists. Please log in.' });
   }
 
@@ -114,13 +125,13 @@ router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10,
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
 
   db.prepare('INSERT INTO otp_requests (id, email, otp, expires_at) VALUES (?, ?, ?, ?)')
-    .run(uuidv4(), email.toLowerCase(), otp, expiresAt);
+    .run(uuidv4(), normalizedEmail, otp, expiresAt);
 
   try {
     const transporter = getTransporter();
     await transporter.sendMail({
       from: config.EMAIL_FROM,
-      to: email,
+      to: normalizedEmail,
       subject: 'Your SOCRATES login code',
       html: `
         <div style="font-family:monospace;background:#0d0d0d;color:#e6edf3;padding:32px;border-radius:12px;max-width:480px">
@@ -131,12 +142,12 @@ router.post('/send-otp', rateLimitAuth('send-otp', { emailLimit: 3, ipLimit: 10,
         </div>
       `,
     });
-    res.json({ success: true, message: 'OTP sent to ' + email });
+    res.json({ success: true, message: 'OTP sent to ' + normalizedEmail });
   } catch (e) {
     console.error('[Auth] Email send failed:', e.message);
     if (process.env.NODE_ENV !== 'production') {
       // In dev mode, log the OTP so the developer can see it
-      console.log(`\n[DEV ONLY] OTP for ${email}: ${otp}\n`);
+      console.log(`\n[DEV ONLY] OTP for ${normalizedEmail}: ${otp}\n`);
       return res.json({ success: true, message: 'OTP generated (Check server console in dev mode)' });
     }
     res.status(500).json({ error: 'Failed to send email: ' + e.message });
@@ -163,6 +174,9 @@ router.post('/verify-otp', rateLimitAuth('verify-otp', { emailLimit: 5, ipLimit:
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
   }
+  if (isAdminIdentity(email)) {
+    return res.status(403).json({ error: 'Admin accounts must sign in using the Admin option and password.' });
+  }
   if (role && !ALLOWED_OTP_ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role specified.' });
   }
@@ -177,11 +191,16 @@ router.post('/verify-otp', rateLimitAuth('verify-otp', { emailLimit: 5, ipLimit:
 
   if (!record) return res.status(401).json({ error: 'Invalid or expired OTP' });
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = db.prepare('SELECT role FROM users WHERE email = ?').get(normalizedEmail);
+  if (existingUser?.role === 'admin') {
+    return res.status(403).json({ error: 'Admin accounts must sign in using the Admin option and password.' });
+  }
+
   // Mark used
   db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
 
-  const normalizedEmail = email.toLowerCase();
-  const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  const userExists = Boolean(existingUser);
   if (!userExists && ['mentor', 'university'].includes(role)) {
     return res.status(403).json({ error: 'Mentor and university accounts must be provisioned by an administrator.' });
   }
@@ -213,7 +232,9 @@ router.post('/admin-login', rateLimitAuth('admin-login', { emailLimit: 5, ipLimi
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  if (!config.ADMIN_EMAILS.includes(normalizedEmail) || password !== config.ADMIN_PASSWORD) {
+  const provisionedAdmin = db.prepare("SELECT id FROM users WHERE email = ? AND role = 'admin'").get(normalizedEmail);
+  const mayBootstrapAdmin = config.ADMIN_EMAILS.includes(normalizedEmail);
+  if ((!mayBootstrapAdmin && !provisionedAdmin) || !config.ADMIN_PASSWORD || password !== config.ADMIN_PASSWORD) {
     console.warn(`[Auth Security] Failed admin password attempt by ${normalizedEmail}`);
     return res.status(401).json({ error: 'Invalid admin email or password' });
   }
@@ -300,13 +321,16 @@ router.post('/google', wrap(async (req, res) => {
 
   // Consistently lowercase email to prevent SQLite UNIQUE collisions across case-sensitivity boundaries
   const normalizedEmail = email.toLowerCase();
+
+  if (isAdminIdentity(normalizedEmail)) {
+    return res.status(403).json({ error: 'Admin accounts must sign in using the Admin option and password.' });
+  }
   
   // Check if user exists for Google login (only allow login, not signup)
-  let userRecord = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
+  let userRecord = db.prepare('SELECT role FROM users WHERE email = ?').get(normalizedEmail);
   if (!userRecord) {
     return res.status(401).json({ error: 'Account not found. Please sign up first.' });
   }
-
   const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { google_id, avatar, role });
   
   if (role === 'admin' && rawUser.role !== 'admin') {

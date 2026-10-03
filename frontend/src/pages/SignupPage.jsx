@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { Shield, ShieldAlert, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
 
@@ -95,7 +95,7 @@ export default function SignupPage() {
           {step === 'otp' && 'Verify Email'}
         </h1>
         <p className="g-sub">
-          {step === 'signup' && 'Create your account to start your AI-guided journey.'}
+          {step === 'signup' && 'Create a student or citizen account. Privileged roles are assigned by an existing administrator.'}
           {step === 'otp' && `We've sent a 6-digit code to ${email}.`}
         </p>
 
@@ -115,7 +115,7 @@ export default function SignupPage() {
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
               <label className="lbl">Role Selection</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setRole('student')}
                   className={`btn ${role === 'student' ? 'btn-p' : 'btn-g'}`}
@@ -129,27 +129,6 @@ export default function SignupPage() {
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   🌍 Citizen
-                </button>
-                <button
-                  onClick={() => setRole('mentor')}
-                  className={`btn ${role === 'mentor' ? 'btn-p' : 'btn-g'}`}
-                  style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  <Shield size={13} /> Mentor
-                </button>
-                <button
-                  onClick={() => setRole('university')}
-                  className={`btn ${role === 'university' ? 'btn-p' : 'btn-g'}`}
-                  style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  🎓 University
-                </button>
-                <button
-                  onClick={() => setRole('admin')}
-                  className={`btn ${role === 'admin' ? 'btn-p' : 'btn-g'}`}
-                  style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  <ShieldAlert size={13} /> Admin
                 </button>
               </div>
             </div>

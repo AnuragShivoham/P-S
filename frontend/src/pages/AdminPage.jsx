@@ -298,7 +298,9 @@ export default function AdminPage() {
                 {activeTab === 'users' && (
                     <div>
                         <h2 style={S.pageTitle}>User Management</h2>
-                        <p style={{ color: '#8b949e', fontSize: 13, marginBottom: 24 }}>Manage platform users, promote to mentor/admin, or revoke access.</p>
+                        <p style={{ color: '#8b949e', fontSize: 13, marginBottom: 24 }}>
+                            Manage platform users and roles. Only an existing admin can grant Admin access. A new admin signs up as a regular user first, is promoted here, then signs in through Admin using the server-configured admin password.
+                        </p>
                         <div style={{ background: '#0d1117', borderRadius: 8, border: '1px solid #21262d', overflow: 'hidden' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>

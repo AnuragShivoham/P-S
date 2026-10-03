@@ -20,6 +20,12 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
+  const selectRole = (nextRole) => {
+    setRole(nextRole);
+    setError('');
+    setMsg('');
+  };
+
   // If already logged in, redirect to dashboard or goal
   useEffect(() => {
     if (token) navigate('/');
@@ -30,11 +36,16 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.sendOtp(email, 'login');
+      const res = await api.sendOtp(email.trim(), 'login');
       setMsg(res.message);
       setStep('otp');
     } catch (e) {
-      setError(e.message);
+      if (e.message.toLowerCase().includes('admin accounts must sign in')) {
+        setRole('admin');
+        setError('This email is reserved for Admin. Enter the admin password below to continue.');
+      } else {
+        setError(e.message);
+      }
     }
     setLoading(false);
   };
@@ -133,35 +144,35 @@ export default function LoginPage() {
               <label className="lbl">Role Selection</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <button
-                  onClick={() => setRole('student')}
+                  onClick={() => selectRole('student')}
                   className={`btn ${role === 'student' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   <User size={13} /> Student
                 </button>
                 <button
-                  onClick={() => setRole('citizen')}
+                  onClick={() => selectRole('citizen')}
                   className={`btn ${role === 'citizen' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   🌍 Citizen
                 </button>
                 <button
-                  onClick={() => setRole('mentor')}
+                  onClick={() => selectRole('mentor')}
                   className={`btn ${role === 'mentor' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   <Shield size={13} /> Mentor
                 </button>
                 <button
-                  onClick={() => setRole('university')}
+                  onClick={() => selectRole('university')}
                   className={`btn ${role === 'university' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   🎓 University
                 </button>
                 <button
-                  onClick={() => setRole('admin')}
+                  onClick={() => selectRole('admin')}
                   className={`btn ${role === 'admin' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
@@ -204,17 +215,29 @@ export default function LoginPage() {
               />
             </div>
 
+            {role !== 'admin' && (
+              <p style={{ margin: '-8px 0 20px', color: 'var(--tx-2)', fontSize: 12, lineHeight: 1.5 }}>
+                Using administrator credentials? Select <strong>Admin</strong> above, then sign in with the authorized admin email and password.
+              </p>
+            )}
+
             {role === 'admin' && (
-              <div style={{ marginBottom: 20 }}>
-                <label className="lbl">Admin Password</label>
-                <input
-                  type="password"
-                  className="input"
-                  placeholder="Enter admin password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-              </div>
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <label className="lbl">Admin Password</label>
+                  <input
+                    type="password"
+                    className="input"
+                    placeholder="Enter admin password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <p style={{ margin: '0 0 20px', color: 'var(--tx-2)', fontSize: 12, lineHeight: 1.5 }}>
+                  Admins sign in directly with their authorized email and the password configured by the server. No admin signup is needed.
+                </p>
+              </>
             )}
 
             <button 
@@ -226,12 +249,14 @@ export default function LoginPage() {
               {loading ? <Loader2 className="spin" /> : <>{role === 'admin' ? 'Access Admin Dashboard' : 'Continue with Email'} <ArrowRight size={16} /></>}
             </button>
 
-            <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: 'var(--tx-2)' }}>
-              Don't have an account?{' '}
-              <Link to="/signup" style={{ color: '#58a6ff', textDecoration: 'none' }}>
-                Sign Up
-              </Link>
-            </div>
+            {role !== 'admin' && (
+              <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: 'var(--tx-2)' }}>
+                Don't have an account?{' '}
+                <Link to="/signup" style={{ color: '#58a6ff', textDecoration: 'none' }}>
+                  Sign Up
+                </Link>
+              </div>
+            )}
           </div>
         )}
 
