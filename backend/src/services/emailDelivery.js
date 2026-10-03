@@ -7,6 +7,7 @@ async function sendWithFallback({
   fetchImpl = globalThis.fetch,
   timeoutMs = 10000
 }) {
+  const sender = resendFrom || 'SOCRATES <onboarding@resend.dev>';
   let smtpError;
 
   if (smtpTransporter) {
@@ -32,7 +33,7 @@ async function sendWithFallback({
         Authorization: `Bearer ${resendApiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ from: resendFrom || smtpFrom, ...message }),
+      body: JSON.stringify({ from: sender, ...message }),
       signal: controller.signal
     });
 

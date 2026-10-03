@@ -54,6 +54,18 @@ async function main() {
   });
   console.log('  PASS SMTP failure falls back to Resend HTTPS');
 
+  await sendWithFallback({
+    resendApiKey: 'test-key',
+    smtpFrom: 'SOCRATES <no-reply@socrates.app>',
+    message,
+    fetchImpl: async (url, options) => {
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.from, 'SOCRATES <onboarding@resend.dev>');
+      return { ok: true, status: 200 };
+    }
+  });
+  console.log('  PASS API-key-only test mode uses Resend shared sender');
+
   await assert.rejects(
     sendWithFallback({
       smtpTransporter: { async sendMail() { throw new Error('SMTP unavailable'); } },
