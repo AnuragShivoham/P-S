@@ -156,108 +156,64 @@ Detailed documentation is available in the repo under the docs folder and archit
 
 This repository is aligned to the production deployment and the labour-intelligence-first vision of the platform. The live app is deployed at https://p-s-socrates.vercel.app and the README reflects the operational, evidence-driven platform scope.
 
-Open → http://localhost:5173
+## Project structure
 
-🔮 Future Scope
-
-=> 📱 Mobile app
-=>🤝 Team collaboration
-=>🧑‍🏫 Mentor marketplace
-=>📊 Analytics dashboard
-=>🧾 Certification system
-
-
-👨‍💻 Team Vision
-
-=> “We don’t want users to just " learn about coding " for months then build for months.
-=> We want them to " ship real projects. in best TIME possible with Learning." EQUALLY   
-
-
-❤️ Final Note
-
-This is not another AI tool.
-This is a discipline system Presented as a product.
-
-## API Endpoints
-
-| Method | Path                          | Description                    |
-|--------|-------------------------------|--------------------------------|
-| POST   | /api/v1/users                 | Register user                  |
-| POST   | /api/v1/goals/submit          | Submit raw goal                |
-| POST   | /api/v1/goals/clarify         | Answer clarification questions |
-| GET    | /api/v1/projects/:id          | Get project state              |
-| GET    | /api/v1/projects/:id/resume   | Resume from last checkpoint    |
-| GET    | /api/v1/projects/:id/milestones | All milestones               |
-| GET    | /api/v1/milestones/:id/tasks  | Tasks in milestone             |
-| POST   | /api/v1/tasks/:id/start       | Start task                     |
-| POST   | /api/v1/tasks/:id/ask         | Ask for guidance               |
-| POST   | /api/v1/tasks/:id/hint        | Get progressive hint           |
-| POST   | /api/v1/tasks/submit          | Submit work for QA review      |
-| GET    | /api/v1/projects/:id/conversation | Full chat history          |
-| GET    | /api/v1/projects/:id/automations  | Automation suggestions     |
-
-Project Structure
-
-amit-bodhit/
-│
-├── backend/                         => Node.js + Express API
+```text
+P-S/
+├── backend/
 │   ├── src/
-│   │   ├── server.js                => Entry point (Express + WebSocket)
-│   │   ├── config.js                => App configuration
-│   │   │
-│   │   ├── routes/                 => API routes
-│   │   │   ├── api.js               => Core application APIs
-│   │   │   ├── auth.js              => Authentication routes
-│   │   │   └── fs.js                => File system APIs
-│   │   │
+│   │   ├── server.js
+│   │   ├── config.js
+│   │   ├── routes/
+│   │   │   ├── api.js
+│   │   │   ├── auth.js
+│   │   │   └── fs.js
 │   │   ├── middleware/
-│   │   │   └── auth.js              => JWT authentication middleware
-│   │   │
-│   │   ├── db/                     => Database layer
-│   │   │   ├── database.js          => SQLite schema & connection
-│   │   │   └── pg.js                => PostgreSQL support (optional)
-│   │   │
-│   │   ├── engines/                => AI Brain (Core Logic)
+│   │   │   └── auth.js
+│   │   ├── db/
+│   │   │   ├── database.js
+│   │   │   └── labour_schema.js
+│   │   ├── engines/
 │   │   │   ├── goalClarifier.js
 │   │   │   ├── milestoneGenerator.js
 │   │   │   ├── taskPlanner.js
 │   │   │   ├── guidedExecution.js
 │   │   │   ├── qaCritic.js
 │   │   │   ├── mentorEngine.js
-│   │   │   └── automationAdvisor.js
-│   │   │
-│   │   ├── services/               => System services
-│   │   │   ├── aiService.js         => LLM provider switch (Groq/Ollama)
-│   │   │   ├── terminalService.js   => WebSocket terminal (PTY)
-│   │   │   ├── workspaceService.js  => File system sandbox
-│   │   │   ├── progressTracker.js   => Progress logic
-│   │   │   ├── socketService.js     => Real-time sessions
-│   │   │   └── memoryService.js     => Context management
-│   │
-│   ├── scripts/                    => Utility scripts
-│   ├── .env.example                => Environment variables template
-│   └── package.json
-│
-├── frontend/                       => React + Vite App
+│   │   │   └── labourIntelligenceEngine.js
+│   │   ├── services/
+│   │   ├── security/
+│   │   └── tests/
+│   ├── scripts/
+│   ├── data/
+│   ├── package.json
+│   └── Dockerfile
+├── frontend/
 │   ├── src/
-│   │   ├── App.jsx                 => Main router
-│   │   ├── main.jsx                => Entry point
-│   │   │
-│   │   ├── pages/                 => Application screens
-│   │   │   ├── LoginPage.jsx
-│   │   │   ├── GoalPage.jsx
-│   │   │   ├── ClarifyPage.jsx
-│   │   │   ├── DashboardPage.jsx
-│   │   │   ├── IdePage.jsx         => Browser IDE
-│   │   │   ├── ProjectsPage.jsx
-│   │   │   ├── MentorPage.jsx
-│   │   │   └── CompletePage.jsx
-│   │   │
-│   │   ├── components/            => Reusable UI components
-│   │   │   ├── Terminal.jsx        => Terminal emulator
-│   │   │   ├── UI.jsx              => Shared UI elements
-│   │   │   └── mentor/             => Mentor dashboard components
-│   │   │
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   ├── pages/
+│   │   ├── components/
+│   │   ├── api/
+│   │   ├── store/
+│   │   └── hooks/
+│   ├── public/
+│   ├── package.json
+│   ├── vite.config.js
+│   └── vercel.json
+├── docs/
+├── LABOUR_INTELLIGENCE_ARCHITECTURE.md
+├── API_CONTRACT.md
+├── README.md
+├── package.json
+├── render.yaml
+└── TODO.md
+```
+
+## Summary
+
+SOCRATES is an execution-driven AI mentor and engineering platform that turns ideas into demonstrable production work. Its labour-intelligence layer connects project execution, verified evidence, and market demand into a single system that helps learners, mentors, and institutions make better decisions.
+
 │   │   ├── api/
 │   │   │   └── client.js           => API communication layer
 │   │   │
