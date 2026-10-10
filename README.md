@@ -2,6 +2,8 @@
 
 Live project: https://p-s-socrates.vercel.app
 
+Video Explanation : https://drive.google.com/file/d/1zapi9RkWijEOB_Q-FHRDI_wDa2wxSDSs/view?usp=drive_link
+
 SOCRATES is an execution-first AI engineering platform that combines a browser IDE, guided project workflow, civic innovation tooling, and a labour-market intelligence layer designed to turn skills, project evidence, and hiring signals into a measurable learning system.
 
 This repository is centered on the Labour Intelligence engine: turning raw job descriptions, employer signals, course requirements, and student evidence into a normalized, verified competency system that helps learners close skill gaps and helps institutions and employers assess real capability.
