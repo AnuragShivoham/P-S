@@ -16,7 +16,10 @@ import {
   Cpu,
   Terminal,
   Info,
-  Loader2
+  Loader2,
+  Monitor,
+  Laptop,
+  HardDrive
 } from 'lucide-react';
 
 export default function SetupPage() {
@@ -43,11 +46,12 @@ export default function SetupPage() {
   useEffect(() => {
     if (isStackAuto) {
       if (type === 'ai') setStack('Python + FastAPI + OpenAI');
-      else if (type === 'api' && skill === 'beginner') setStack('Node.js + Express + SQLite');
-      else if (type === 'api') setStack('Node.js + Express + PostgreSQL');
-      else if (type === 'fullstack' && skill === 'beginner') setStack('React + Node.js + Tailwind');
-      else if (type === 'fullstack') setStack('Next.js + Supabase + Tailwind');
+      else if (type === 'hardware') setStack('ESP32 + C++ + MQTT');
+      else if (type === 'service' || type === 'api') setStack(skill === 'beginner' ? 'Node.js + Express + SQLite' : 'Node.js + Express + PostgreSQL');
+      else if (['web', 'fullstack', 'mobile', 'desktop'].includes(type) && skill === 'beginner') setStack('React + Node.js + Tailwind');
+      else if (['web', 'fullstack', 'mobile', 'desktop'].includes(type)) setStack('React + TypeScript + Node.js');
       else if (type === 'cli') setStack('Node.js + Commander.js');
+      else if (type === 'software') setStack('TypeScript + Node.js');
     }
   }, [type, skill, isStackAuto]);
 
@@ -214,8 +218,12 @@ export default function SetupPage() {
           <span className="setup-label">03. Project Model</span>
           <div className="mcq-group">
             {[
-              { id: 'api', label: 'Backend API', desc: 'JSON services & logic', icon: <Cpu /> },
-              { id: 'fullstack', label: 'Fullstack App', desc: 'UI + Database + Auth', icon: <Globe /> },
+              { id: 'software', label: 'Software App', desc: 'General-purpose software product', icon: <Code /> },
+              { id: 'web', label: 'Web App', desc: 'Browser-based UI, data, and accounts', icon: <Globe /> },
+              { id: 'mobile', label: 'Mobile App', desc: 'iOS or Android application', icon: <Monitor /> },
+              { id: 'desktop', label: 'Desktop App', desc: 'Windows, macOS, or Linux app', icon: <Laptop /> },
+              { id: 'service', label: 'Backend Service / API', desc: 'Web services, APIs, and integrations', icon: <Cpu /> },
+              { id: 'hardware', label: 'Hardware / IoT', desc: 'Devices, sensors, and embedded software', icon: <HardDrive /> },
               { id: 'ai', label: 'AI Integrated', desc: 'LLM & Prompt Logic', icon: <Brain /> },
               { id: 'cli', label: 'CLI Tool', desc: 'Terminal automations', icon: <Terminal /> }
             ].map(item => (

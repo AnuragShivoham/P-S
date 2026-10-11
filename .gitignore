@@ -30,6 +30,7 @@ Thumbs.db
 # Editor
 .vscode/settings.json
 .idea/
+.vercel/
 
 # DB
 *.db-shm
@@ -54,3 +55,7 @@ data/
 
 # Export script
 export_codebase.js
+
+# Planning & Scratch
+docs/implementation_plan*.md
+TODO.md

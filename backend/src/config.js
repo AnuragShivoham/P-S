@@ -15,7 +15,9 @@ module.exports = {
   GROQ_API_KEY,
   GROQ_MODEL: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
   LOCAL_MODEL: process.env.LOCAL_MODEL || 'phi3:mini', // Use phi3:mini for speed
-  DB_PATH: process.env.DB_PATH || './data/socrates.db',
+  DB_PATH: process.env.DB_PATH || path.resolve(__dirname, '../data/socrates.db'),
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000')
+    .split(',').map(origin => origin.trim()).filter(Boolean),
   MAX_CLARIFY_ROUNDS: 10,
   QA_PASS_SCORE: 0.70,
   JWT_SECRET: process.env.JWT_SECRET || 'socrates-secret-change-in-prod',

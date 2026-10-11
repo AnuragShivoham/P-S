@@ -12,7 +12,7 @@ import {
     Square, CheckSquare, PlayCircle, Puzzle, Monitor, ShieldCheck, User2, Laptop, Palette,
     Monitor as MonitorIcon, Puzzle as PuzzleIcon, PanelLeft, Layout, ExternalLink, X, XCircle, Settings
 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, apiUrl, apiWebSocketUrl } from '../api/client';
 import { useStore } from '../store';
 import '@xterm/xterm/css/xterm.css';
 import ExplainModal from '../components/mentor/ExplainModal';
@@ -373,6 +373,7 @@ export default function IDE() {
     // Layout State
     const [showSidebar, setShowSidebar] = useState(true);
     const [showTerm, setShowTerm] = useState(true);
+    const [terminalConnection, setTerminalConnection] = useState('Connecting…');
     const [showChat, setShowChat] = useState(true);
     const [activeSidebarTab, setActiveSidebarTab] = useState('explorer');
     const [rightSidebarTab, setRightSidebarTab] = useState('mentor');
@@ -952,7 +953,8 @@ export default function IDE() {
         status('Preparing ZIP...');
         try {
             const headers = { 'Authorization': `Bearer ${token}` };
-            const res = await fetch(`http://localhost:3000/api/v1/fs/download/${project.id}`, { headers });
+            const res = await fetch(apiUrl(`/fs/download/${project.id}`), { headers });
+            if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1058,16 +1060,21 @@ export default function IDE() {
     };
 
     useEffect(() => {
+        if (!project?.id || !token) return;
         const term = new Terminal({ theme: { background: '#0a0a0a' }, fontSize: 13, cursorBlink: true });
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon); term.open(termRef.current); fitAddon.fit();
         termObjRef.current = term;
         fitAddonRef.current = fitAddon;
-        if (!project?.id || !token) return;
-        const host = window.location.host.split(':')[0]; 
-        const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${host}:3001/api/v1/terminal?projectId=${project.id}&token=${token}`);
+        const wsUrl = new URL(apiWebSocketUrl('/terminal'));
+        wsUrl.searchParams.set('projectId', project.id);
+        wsUrl.searchParams.set('token', token);
+        const ws = new WebSocket(wsUrl.toString());
         wsRef.current = ws;
+        setTerminalConnection('Connecting…');
         ws.onopen = () => {
+            setTerminalConnection('Connected');
+            term.focus();
             ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
             if (localSyncAbsPath) {
                 setTimeout(() => {
@@ -1075,7 +1082,29 @@ export default function IDE() {
                 }, 500); // slight delay to allow shell to load
             }
         };
-        ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'output') term.write(m.data); };
+        ws.onmessage = (e) => {
+            try {
+                const m = JSON.parse(e.data);
+                if (m.type === 'output') term.write(m.data);
+                else if (m.type === 'error') {
+                    setTerminalConnection(m.message || 'Terminal error');
+                    term.write(`\r\n\x1b[31m${m.message || 'Terminal error'}\x1b[0m\r\n`);
+                }
+            } catch (error) {
+                console.error('[IDE Terminal] Invalid server message', error);
+            }
+        };
+        ws.onerror = () => setTerminalConnection('Connection error — terminal websocket could not connect');
+        ws.onclose = (event) => {
+            const reason = event.reason || `connection closed (${event.code})`;
+            const message = event.code === 1008
+                ? `Session rejected (${reason}). Sign out, sign in again, then reopen this project.`
+                : event.code === 1011
+                    ? `Terminal process failed to start (${reason}). Check backend container logs.`
+                    : `Disconnected: ${reason}`;
+            setTerminalConnection(message);
+            term.write(`\r\n\x1b[31m[Terminal] ${message}\x1b[0m\r\n`);
+        };
         term.onData(data => {
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'input', data }));
@@ -1170,6 +1199,17 @@ export default function IDE() {
             if (activeFile?.path && activeFile.path.startsWith(node.path)) setActiveFile(null);
         } catch (e) { status('Delete failed', true); }
     };
+
+    if (!project?.id) {
+        return (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 14, background: '#0d1117', color: '#8b949e' }}>
+                <Files size={30} />
+                <div style={{ color: '#e6edf3', fontSize: 18, fontWeight: 700 }}>Open a project to use the IDE</div>
+                <div>Select a project first; its files, editor, terminal, and project tools will load here.</div>
+                <button onClick={() => navigate('/projects')} style={{ background: '#238636', color: 'white', border: 0, borderRadius: 6, padding: '9px 16px', cursor: 'pointer', fontWeight: 700 }}>Go to Projects</button>
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', flex: 1, width: '100%', background: '#0d0d0d', color: '#c9d1d9', overflow: 'hidden', flexDirection: 'column' }}>
@@ -1335,10 +1375,10 @@ export default function IDE() {
                         />
                         <div style={{ height: termHeight, background: '#0a0a0a', display: 'flex', flexDirection: 'column' }}>
                             <div style={{ display: 'flex', padding: '4px 12px', background: '#010409', borderBottom: '1px solid #21262d', fontSize: 10, color: '#8b949e', justifyContent: 'space-between' }}>
-                                <span>TERMINAL</span>
+                                <span>TERMINAL · {terminalConnection}</span>
                                 <button onClick={() => setShowTerm(false)} style={iconBtn}><X size={12} /></button>
                             </div>
-                            <div style={{ flex: 1, padding: 8 }} ref={termRef} />
+                            <div style={{ flex: 1, padding: 8, minHeight: 0 }} ref={termRef} onClick={() => termObjRef.current?.focus()} />
                         </div>
                         </>
                     )}

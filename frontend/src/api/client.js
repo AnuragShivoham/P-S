@@ -1,4 +1,14 @@
-const BASE = '/api/v1';
+const BASE = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/+$/, '');
+
+export const apiUrl = path => `${BASE}${path.startsWith('/') ? path : `/${path}`}`;
+
+export const apiWebSocketUrl = path => {
+  const wsBase = (import.meta.env.VITE_WS_URL || BASE).replace(/\/+$/, '');
+  const url = new URL(`${wsBase}${path.startsWith('/') ? path : `/${path}`}`, window.location.origin);
+  url.protocol = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
+  return url.toString();
+};
+
 async function req(method, path, body) {
   const token = localStorage.getItem('ab_token');
   const headers = { 'Content-Type': 'application/json' };
@@ -7,7 +17,7 @@ async function req(method, path, body) {
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   console.log(`[API] ${method} ${path}`, body || '');
-  const r = await fetch(`${BASE}${path}`, opts);
+  const r = await fetch(apiUrl(path), opts);
   
   let d = {};
   const contentType = r.headers.get('content-type');

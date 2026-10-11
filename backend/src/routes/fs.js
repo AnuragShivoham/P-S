@@ -207,6 +207,20 @@ router.get('/tree', (req, res) => {
   try {
     const project = getUserProject(req, req.query.projectId);
     const dir = req.query.dir || '';
+    const workspacePath = WorkspaceService.getProjectPath(project.id);
+    if (!fs.existsSync(workspacePath) || fs.readdirSync(workspacePath).length === 0) {
+      const fullProject = db.prepare('SELECT project_type, tech_stack FROM projects WHERE id = ?').get(project.id);
+      const stack = (() => {
+        try { return JSON.parse(fullProject?.tech_stack || '[]'); } catch { return []; }
+      })();
+      const template = fullProject?.project_type === 'hardware'
+        ? 'nodejs'
+        : (fullProject?.project_type === 'ai' || stack.some(item => /python|fastapi|django|flask/i.test(item))
+          ? 'python'
+          : (['web', 'mobile', 'desktop', 'fullstack'].includes(fullProject?.project_type) ? 'react' : 'nodejs'));
+      WorkspaceService.createProjectWorkspace(project.id);
+      WorkspaceService.initializeProjectStructure(project.id, template);
+    }
     const files = WorkspaceService.listFiles(project.id, dir);
     res.json({ projectId: project.id, directory: dir || '/', tree: files });
   } catch (err) {

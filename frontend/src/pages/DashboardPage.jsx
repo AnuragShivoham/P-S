@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useStore } from '../store';
 import { StatusBadge, ProgressBar, Spinner, TermBlock, FolderTree, QAPanel, CodeBlock } from '../components/UI';
 import ProgressPanel from '../components/ide/ProgressPanel';
-import { Paperclip, X, ShieldAlert, Zap } from 'lucide-react';
+import { Paperclip, X, ShieldAlert, Zap, Code2 } from 'lucide-react';
 import ExplainModal from '../components/mentor/ExplainModal';
 
 // ─── SIDEBAR ─────────────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
   return (
     <div>
       {/* Task card */}
-      <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.1s', opacity: 0 }}>
+      <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.1s' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
           <div style={{ flex: 1, paddingRight: 12 }}>
             <div className="task-meta">Day {task.day} · {task.estimated_hours}h est · attempt {task.attempts || 0}</div>
@@ -217,7 +217,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
 
       {/* Ask guidance */}
       {canInteract && (
-        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.2s', opacity: 0 }}>
+        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.2s' }}>
           <label className="lbl">Ask for Guidance</label>
           <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Be specific. Vague questions get vague hints.</div>
           {askImage && (
@@ -271,7 +271,7 @@ function TaskPanel({ task, onSubmit, submitting }) {
 
       {/* Submission */}
       {canInteract && (
-        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.3s', opacity: 0 }}>
+        <div className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '20px', animationDelay: '0.3s' }}>
           <label className="lbl">Submit Your Work</label>
           <div style={{ color: 'var(--tx-d)', fontSize: 10, marginBottom: 8 }}>Type your code + terminal output. Pasting is disabled for submitted work.</div>
           <textarea className="input" rows={7}
@@ -316,7 +316,7 @@ function MilestonesTab({ milestones }) {
   return (
     <div>
       {(Array.isArray(milestones) ? milestones : []).map((m, idx) => (
-        <div key={m.id} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${idx * 0.1}s`, opacity: 0 }}>
+        <div key={m.id} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${idx * 0.1}s` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 15, fontWeight: 800, color: 'var(--tx)', marginBottom: 3 }}>
@@ -347,7 +347,7 @@ function AutomationsTab({ automations = [] }) {
   return (
     <div>
       {(Array.isArray(automations) ? automations : []).map((a, i) => (
-        <div key={i} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${i * 0.1}s`, opacity: 0 }}>
+        <div key={i} className="glass-card anim-slide-up" style={{ padding: '24px', marginBottom: '16px', animationDelay: `${i * 0.1}s` }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
             <span style={{ background: 'var(--b-dim)', color: 'var(--blue)', border: '1px solid rgba(91,138,245,.2)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
               {a.tool}
@@ -440,7 +440,7 @@ export default function DashboardPage() {
   return (
     <div className="dash" style={{ background: 'linear-gradient(135deg, #010409, #0d1117, #060913)', backgroundSize: '400% 400%', animation: 'gradientMesh 15s ease infinite' }}>
       <Sidebar project={project} milestones={milestones} onNew={() => { reset(); navigate('/'); }} />
-      <div className="dash-main anim-slide-up" style={{ animationDelay: '0.1s', opacity: 0 }}>
+      <div className="dash-main">
 
         {/* Project Context Header */}
         <div style={{ marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
@@ -460,6 +460,12 @@ export default function DashboardPage() {
           <h1 style={{ fontSize: 24, fontWeight: 800, color: 'var(--tx)', margin: '0 0 16px 0', fontFamily: 'var(--sans)' }}>
             {project.title || project.raw_goal}
           </h1>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+            <button className="btn btn-p" onClick={() => navigate('/ide')}>
+              <Code2 size={15} /> Open Project IDE
+            </button>
+          </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <ProgressBar pct={project.progress_pct || 0} />

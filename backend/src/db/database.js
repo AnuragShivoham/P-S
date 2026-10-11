@@ -6,6 +6,12 @@ const fs   = require('fs');
 const config = require('../config');
 
 const DB_PATH = config.DB_PATH || './data/socrates.db';
+if (process.env.NODE_ENV === 'production' && !process.env.DB_PATH) {
+  console.warn('[DB] Production is using the default SQLite path. Set DB_PATH to a persistent mounted volume or user data may be lost on redeploy.');
+}
+if (process.env.DATABASE_URL) {
+  console.warn('[DB] DATABASE_URL is set, but this app currently uses SQLite (DB_PATH); DATABASE_URL is not connected.');
+}
 const dir = path.dirname(DB_PATH);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -374,6 +380,7 @@ if (!projInfo.includes('is_course')) {
   console.log('[DB] Migrated: added V2 course metadata to projects');
 }
 if (!projInfo.includes('title'))          db.exec("ALTER TABLE projects ADD COLUMN title TEXT");
+if (!projInfo.includes('project_type'))   db.exec("ALTER TABLE projects ADD COLUMN project_type TEXT DEFAULT 'software'");
 if (!projInfo.includes('tech_stack'))     db.exec("ALTER TABLE projects ADD COLUMN tech_stack TEXT DEFAULT '[]'");
 if (!projInfo.includes('scope'))          db.exec("ALTER TABLE projects ADD COLUMN scope TEXT DEFAULT ''");
 if (!projInfo.includes('deadline_days'))  db.exec("ALTER TABLE projects ADD COLUMN deadline_days INTEGER DEFAULT 7");

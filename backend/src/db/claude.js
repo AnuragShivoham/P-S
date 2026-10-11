@@ -69,7 +69,13 @@ async function callClaude(system, userMsg, history = [], maxTokens = 2000, temp 
     const data = await res.json();
     clearTimeout(timeout);
 
-    if (!res.ok) throw new Error(JSON.stringify(data));
+    if (!res.ok) {
+      const apiError = data?.error || {};
+      if (apiError.code === 'expired_api_key' || apiError.code === 'invalid_api_key' || res.status === 401) {
+        throw new Error('The backend AI provider key is invalid or expired. Set a valid GROQ_API_KEY in the Railway backend environment.');
+      }
+      throw new Error(apiError.message || `AI provider request failed (HTTP ${res.status}).`);
+    }
     return data.choices[0].message.content.trim();
   } catch (e) {
     clearTimeout(timeout);

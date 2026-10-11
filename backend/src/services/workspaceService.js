@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuid } = require('uuid');
 
-const BASE_WORKSPACE = process.env.WORKSPACE_PATH || './workspace';
+const BASE_WORKSPACE = path.resolve(process.env.WORKSPACE_PATH || path.join(__dirname, '../../../workspace'));
 
 /**
  * Workspace Service

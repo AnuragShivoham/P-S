@@ -1,7 +1,7 @@
 FROM node:22-alpine
 
 # Install dependencies required to compile native Node.js modules like `node-pty`
-RUN apk add --no-cache python3 make g++ linux-headers
+RUN apk add --no-cache python3 make g++ linux-headers bash git
 
 WORKDIR /app
 

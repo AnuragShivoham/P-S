@@ -20,7 +20,14 @@ const optionalAuth = require('./middleware/optionalAuth');
 
 const app = express();
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'], credentials: true }));
+const allowedOrigins = new Set(config.CORS_ORIGINS);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 

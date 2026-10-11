@@ -1,13 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { RotateCw, ExternalLink, Globe, Layout, Maximize2 } from 'lucide-react';
+import { apiUrl } from '../../api/client';
 
 export default function WebPreview({ projectId, initialUrl = '' }) {
     const [key, setKey] = useState(0);
     const [url, setUrl] = useState(initialUrl); // Subpath
     
-    // Fallback to window.location.hostname to avoid localhost issues in some environments
-    const host = window.location.hostname;
-    const previewUrl = `http://${host}:3001/api/v1/preview/${projectId}/${url}`;
+    const previewUrl = apiUrl(`/preview/${projectId}/${url}`);
 
     const refresh = () => setKey(k => k + 1);
 

@@ -130,7 +130,7 @@ export default function LoginPage() {
         {step === 'login' && (
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
-              <label className="lbl">Role Selection</label>
+              <label className="lbl">Role Selection — choose Admin only for an admin account</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setRole('student')}
@@ -206,6 +206,9 @@ export default function LoginPage() {
 
             {role === 'admin' && (
               <div style={{ marginBottom: 20 }}>
+                <div style={{ color: 'var(--tx-2)', fontSize: 11, lineHeight: 1.5, marginBottom: 10 }}>
+                  Admin accounts must sign in using the Admin option and password. This option does not create or grant admin access.
+                </div>
                 <label className="lbl">Admin Password</label>
                 <input
                   type="password"

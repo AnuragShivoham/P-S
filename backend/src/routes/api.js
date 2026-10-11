@@ -27,14 +27,17 @@ async function generateMilestones(res, project, extracted) {
   // Save extracted details temporarily or transition to 'planning'
   // Map NEW schema to OLD DB fields
   const title = extracted.title || project.raw_goal;
-  const stack = JSON.stringify(extracted.stack || extracted.tech_stack || []);
+  const rawStack = extracted.stack || extracted.tech_stack || [];
+  const stack = JSON.stringify(Array.isArray(rawStack)
+    ? rawStack
+    : String(rawStack).split(/[+,]/).map(item => item.trim()).filter(Boolean));
   const scope = extracted.scope || "";
   const days  = extracted.time || extracted.deadline_days || 7;
   const level = extracted.skill || extracted.skill_level || 'beginner';
   const feats = JSON.stringify(extracted.features || extracted.deliverables || []);
 
-  db.prepare(`UPDATE projects SET title=?,tech_stack=?,scope=?,deadline_days=?,skill_level=?,deliverables=?,status='planning' WHERE id=?`)
-    .run(title, stack, scope, days, level, feats, project.id);
+  db.prepare(`UPDATE projects SET title=?,project_type=?,tech_stack=?,scope=?,deadline_days=?,skill_level=?,deliverables=?,status='planning' WHERE id=?`)
+    .run(title, extracted.type || extracted.project_type || project.project_type || 'software', stack, scope, days, level, feats, project.id);
 
   const planData = await milestoneGenerator.generateMilestones(extracted);
   const milestones = planData.milestones || planData;
@@ -48,8 +51,50 @@ async function generateMilestones(res, project, extracted) {
   });
 }
 
+function mergeClarifiedProject(project, history, extracted = {}) {
+  const setup = [...history].reverse().find(item => item?.phase === 'setup' ||
+    (item?.answers && ['skill', 'time', 'type', 'stack', 'features'].every(key => Object.hasOwn(item.answers, key))))?.answers || {};
+  const questionLabels = new Map(history.flatMap(item => Array.isArray(item?.questions)
+    ? item.questions.map(question => [question.id, question.text || question.id])
+    : []));
+  const context = history
+    .filter(item => item?.phase === 'discovery_answers' && item.answers)
+    .flatMap(item => Object.entries(item.answers).map(([id, answer]) => `${questionLabels.get(id) || id}: ${answer}`))
+    .join('\n');
+  const stack = setup.stack ?? extracted.stack ?? project.tech_stack ?? [];
+  const features = setup.features ?? extracted.features ?? project.deliverables ?? [];
+
+  return {
+    ...extracted,
+    title: extracted.title || project.title || project.raw_goal,
+    skill: setup.skill || extracted.skill || project.skill_level || 'beginner',
+    time: Number(setup.time) || extracted.time || project.deadline_days || 7,
+    type: setup.type || extracted.type || project.project_type || 'software',
+    stack,
+    features: Array.isArray(features) ? features : [],
+    scope: [extracted.scope, context].filter(Boolean).join('\n\n')
+  };
+}
+
 async function recoverIncompleteProject(project) {
-  const result = await goalClarifier.clarifyGoal(project.raw_goal, project.clarification_history || []);
+  const history = Array.isArray(project.clarification_history) ? project.clarification_history : [];
+  const setupEntry = [...history].reverse().find(item => item?.phase === 'setup' ||
+    (item?.answers && ['skill', 'time', 'type', 'stack', 'features'].every(key => Object.hasOwn(item.answers, key))));
+  const pendingQuestions = [...history].reverse().find(item => Array.isArray(item?.questions) && item.questions.length > 0);
+
+  if (pendingQuestions && !history.slice(history.lastIndexOf(pendingQuestions) + 1).some(item => item?.phase === 'discovery_answers')) {
+    return { action: 'clarify', message: 'Continue answering the project-specific discovery questions.', project, questions: pendingQuestions.questions };
+  }
+  const pendingSetupUpdate = [...history].reverse().find(item => item?.phase === 'setup_update');
+  if (pendingSetupUpdate) {
+    return { action: 'setup', message: 'Review the remaining project setup details.', project, missing: pendingSetupUpdate.missing || [], extracted: pendingSetupUpdate.extracted || {} };
+  }
+  if (!setupEntry) {
+    const initial = [...history].reverse().find(item => item && (Object.hasOwn(item, 'extracted') || Object.hasOwn(item, 'missing'))) || {};
+    return { action: 'setup', message: 'Complete the project setup before generating milestones.', project, missing: initial.missing || [], extracted: initial.extracted || {} };
+  }
+
+  const result = await goalClarifier.clarifyGoal(project.raw_goal, history);
   const refinementOptions = Array.isArray(result.refinement_options)
     ? result.refinement_options.filter(option => typeof option === 'string' && option.trim())
     : [];
@@ -59,8 +104,8 @@ async function recoverIncompleteProject(project) {
   }
 
   if (result.status === 'needs_clarification' && Array.isArray(result.questions) && result.questions.length > 0) {
-    db.prepare("UPDATE projects SET status='clarifying', clarification_history=?, clarification_round=0 WHERE id=?")
-      .run(JSON.stringify([{ questions: result.questions }]), project.id);
+    history.push({ phase: 'discovery', questions: result.questions });
+    tracker.setClarification(project.id, history, project.clarification_round || 0);
     return {
       action: 'clarify',
       message: result.confirmation_text || 'Identifying discovery questions...',
@@ -70,7 +115,8 @@ async function recoverIncompleteProject(project) {
   }
 
   if (result.status === 'needs_setup' || result.missing) {
-    tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
+    history.push({ phase: 'setup_update', missing: result.missing, extracted: result.extracted });
+    tracker.setClarification(project.id, history, project.clarification_round || 0);
     return {
       action: 'setup',
       message: result.confirmation_text || 'Analyzing project requirements...',
@@ -80,10 +126,14 @@ async function recoverIncompleteProject(project) {
     };
   }
 
-  const extracted = result.extracted || result;
+  const extracted = mergeClarifiedProject(project, history, result.extracted || result);
   const title = extracted.title || project.raw_goal;
-  db.prepare("UPDATE projects SET status='planning', title=?, updated_at=? WHERE id=?")
-    .run(title, new Date().toISOString(), project.id);
+  const stack = Array.isArray(extracted.stack)
+    ? extracted.stack
+    : String(extracted.stack || '').split(/[+,]/).map(item => item.trim()).filter(Boolean);
+  const features = Array.isArray(extracted.features) ? extracted.features : [];
+  db.prepare("UPDATE projects SET status='planning', title=?, project_type=?, tech_stack=?, scope=?, deadline_days=?, skill_level=?, deliverables=?, updated_at=? WHERE id=?")
+    .run(title, extracted.type || 'software', JSON.stringify(stack), extracted.scope || '', Number(extracted.time) || 7, extracted.skill || 'beginner', JSON.stringify(features), new Date().toISOString(), project.id);
   const planData = await milestoneGenerator.generateMilestones(extracted);
   return {
     action: 'milestones_generated',
@@ -95,11 +145,23 @@ async function recoverIncompleteProject(project) {
 
 // ── INTERNAL: finalize activation (Step 3) ──────────────────────────────────
 async function finalizeActivation(res, projectId, confirmedMilestones) {
+  if (!Array.isArray(confirmedMilestones) || confirmedMilestones.length === 0) {
+    throw new Error('At least one milestone is required to activate a project');
+  }
   let project = tracker.getProject(projectId);
   if (!project) throw new Error('Project not found');
 
   // Insert milestones — normalize AI-generated objects (they have no 'order' field)
   const mObjs = confirmedMilestones.map((m, i) => tracker.createMilestone(project.id, { ...m, order: m.order ?? m.ord ?? (i + 1) }));
+
+  const stackNames = Array.isArray(project.tech_stack) ? project.tech_stack : [];
+  const template = project.project_type === 'hardware'
+    ? 'nodejs'
+    : (stackNames.some(item => /python|fastapi|django|flask/i.test(item)) || project.project_type === 'ai'
+      ? 'python'
+      : (['web', 'mobile', 'desktop', 'fullstack'].includes(project.project_type) ? 'react' : 'nodejs'));
+  WorkspaceService.createProjectWorkspace(project.id);
+  WorkspaceService.initializeProjectStructure(project.id, template);
 
   // Activate & setup first task
   const first = mObjs[0];
@@ -215,7 +277,7 @@ router.post('/goals/submit', wrap(async (req, res) => {
   }
 
   // Always route to setup to let the user confirm/fill the parameters
-  tracker.setClarification(project.id, [{ missing: result.missing, extracted: result.extracted }], 1);
+  tracker.setClarification(project.id, [{ phase: 'goal', missing: result.missing, extracted: result.extracted }], 1);
   db.prepare("UPDATE projects SET status='clarifying' WHERE id=?").run(project.id);
   return res.status(201).json({
     action: 'setup',
@@ -241,7 +303,9 @@ router.post('/goals/clarify', wrap(async (req, res) => {
   }
 
   const history = Array.isArray(project.clarification_history) ? project.clarification_history : [];
-  history.push({ answers });
+  const isDiscoverySubmission = history.some(item => item?.phase === 'discovery');
+  const isSetupSubmission = answers && ['skill', 'time', 'type', 'stack', 'features'].every(key => Object.hasOwn(answers, key));
+  history.push({ phase: isSetupSubmission ? 'setup' : (isDiscoverySubmission ? 'discovery_answers' : 'answers'), answers });
   tracker.setClarification(project_id, history, project.clarification_round + 1);
   tracker.logTurn(project_id, 'user', JSON.stringify(answers), 'clarification');
 
@@ -255,7 +319,7 @@ router.post('/goals/clarify', wrap(async (req, res) => {
     : [];
 
   if (result.status === 'needs_clarification' && questions.length > 0) {
-    history.push({ questions });
+    history.push({ phase: 'discovery', questions });
     tracker.setClarification(project_id, history, project.clarification_round + 1);
     return res.json({ 
       action: 'clarify', 
@@ -278,16 +342,28 @@ router.post('/goals/clarify', wrap(async (req, res) => {
   }
 
   if (result.status === 'clear') {
-    return await generateMilestones(res, project, result.extracted || result);
+    const extracted = isDiscoverySubmission
+      ? mergeClarifiedProject(project, history, result.extracted || result)
+      : result.extracted || result;
+    return await generateMilestones(res, project, extracted);
   }
 
-  await generateMilestones(res, tracker.getProject(project_id), result);
+  const extracted = isDiscoverySubmission
+    ? mergeClarifiedProject(project, history, result.extracted || result)
+    : result;
+  await generateMilestones(res, tracker.getProject(project_id), extracted);
 }));
 
 
 router.post('/goals/confirm', wrap(async (req, res) => {
   const { project_id, milestones } = req.body;
-  if (!project_id || !milestones) return res.status(400).json({ error: 'project_id and milestones required' });
+  if (!project_id || !Array.isArray(milestones) || milestones.length === 0) {
+    return res.status(400).json({ error: 'project_id and a non-empty milestones array are required' });
+  }
+  const project = tracker.getProject(project_id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  if (project.status !== 'planning') return res.status(409).json({ error: 'Project is not awaiting plan confirmation' });
   await finalizeActivation(res, project_id, milestones);
 }));
 
@@ -530,6 +606,9 @@ router.get('/projects/latest', wrap(async (req, res) => {
   if (!state || !state.project || state.project.user_id !== userId) return res.json({ project: null });
 
   const { project } = state;
+  if (project.status === 'clarifying') {
+    return res.json(await recoverIncompleteProject(project));
+  }
   if (project.status === 'active' && !state.milestone && !state.task) {
     return res.json(await recoverIncompleteProject(project));
   }
@@ -588,6 +667,10 @@ router.get('/projects/:id/resume', wrap(async (req, res) => {
   let { milestone, task } = state;
 
   tracker.setActiveProject(req.user.id, project.id);
+
+  if (project.status === 'clarifying') {
+    return res.json(await recoverIncompleteProject(project));
+  }
 
   // PLANNING STATE: Regenerate plan if not confirmed
   if (project.status === 'planning') {

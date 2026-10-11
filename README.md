@@ -27,6 +27,7 @@ SOCRATES addresses that by combining:
 - Public landing page: https://p-s-socrates.vercel.app/
 - Problems directory: https://p-s-socrates.vercel.app/problems
 - Labour intelligence dashboard: https://p-s-socrates.vercel.app/labour-intelligence
+- Video explanation: https://drive.google.com/file/d/1zapi9RkWijEOB_Q-FHRDI_wDa2wxSDSs/view?usp=drive_link
 
 ## Labour Intelligence: the core differentiator
 
@@ -144,6 +145,20 @@ Open the app at:
 - http://localhost:5173
 - http://localhost:5173/labour-intelligence
 
+## Production deployment requirements
+
+The Vercel site is the frontend only. The API, project files, terminal WebSocket, and SQLite database must run on a persistent Node.js service; the API needs WebSocket support and a persistent disk. Configure these deployment variables before building/deploying:
+
+- Frontend: `VITE_API_URL=https://<backend-host>/api/v1` and `VITE_WS_URL=wss://<backend-host>/api/v1`.
+- Backend: `CORS_ORIGINS=https://p-s-socrates.vercel.app` (include any additional deployed frontend origins), `DB_PATH` pointing to the mounted persistent disk, for example `/var/data/socrates.db`, and `WORKSPACE_PATH` pointing to its persistent workspace volume.
+- Keep `JWT_SECRET` identical across backend restarts and set the required AI/email credentials on the backend.
+
+The current server uses SQLite at `DB_PATH`. Setting `DATABASE_URL` alone does **not** switch it to PostgreSQL; the existing PostgreSQL adapter is not wired into the application. Local accounts and projects live in the local SQLite file and are not automatically synchronized to production. To retain those records, explicitly migrate the SQLite database to the production service using its supported storage/setup process; accounts must otherwise be created on the live site.
+
+To copy the current local SQLite data, first stop the local backend and create a consistent backup with `npm run db:backup -- <private-path>/socrates-production.db` from the backend directory. Transfer that private backup to the backend host's persistent disk, stop the live backend, set `DB_PATH` to that file, and start it again. The database contains account emails and project information: do not commit the backup, put it in a public upload, or overwrite an existing production database without taking a separate backup. This is a one-time migration; ongoing local/live synchronization is not implemented.
+
+The IDE previously connected its terminal, preview, and workspace download to hard-coded `localhost` ports. The frontend now uses `VITE_API_URL`/`VITE_WS_URL`; redeploy the frontend after setting these build-time variables. Set the backend CORS allowlist to include the deployed frontend origin.
+
 ## Documentation
 
 Detailed documentation is available in the repo under the docs folder and architecture references:
@@ -208,8 +223,7 @@ P-S/
 ├── API_CONTRACT.md
 ├── README.md
 ├── package.json
-├── render.yaml
-└── TODO.md
+└── render.yaml
 ```
 
 ## Summary

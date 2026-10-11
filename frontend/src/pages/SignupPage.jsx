@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { Shield, ShieldAlert, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Shield, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
 
@@ -114,8 +114,8 @@ export default function SignupPage() {
         {step === 'signup' && (
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
-              <label className="lbl">Role Selection</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              <label className="lbl">Role Selection — admin accounts sign in from the Admin option</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setRole('student')}
                   className={`btn ${role === 'student' ? 'btn-p' : 'btn-g'}`}
@@ -143,13 +143,6 @@ export default function SignupPage() {
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
                   🎓 University
-                </button>
-                <button
-                  onClick={() => setRole('admin')}
-                  className={`btn ${role === 'admin' ? 'btn-p' : 'btn-g'}`}
-                  style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  <ShieldAlert size={13} /> Admin
                 </button>
               </div>
             </div>

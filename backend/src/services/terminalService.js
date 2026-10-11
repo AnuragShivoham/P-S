@@ -70,13 +70,23 @@ function setupTerminalWS(wss, authenticate) {
       fs.mkdirSync(workspacePath, { recursive: true });
     }
 
-    const ptyProcess = pty.spawn(shell, shellArgs, {
-      name: 'xterm-color',
-      cols: 80,
-      rows: 24,
-      cwd: workspacePath,
-      env: { ...process.env, PROJECT_ID: projectId, WORKSPACE_ROOT: workspacePath },
-    });
+    let ptyProcess;
+    try {
+      ptyProcess = pty.spawn(shell, shellArgs, {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 24,
+        cwd: workspacePath,
+        env: { ...process.env, PROJECT_ID: projectId, WORKSPACE_ROOT: workspacePath },
+      });
+    } catch (err) {
+      console.error(`[Terminal] PTY spawn failed (${projectId}):`, err.message);
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: `Terminal could not start: ${err.message}` }));
+        ws.close(1011, 'Terminal process could not start');
+      }
+      return;
+    }
 
     ptyProcess.onData((data) => {
       if (ws.readyState === ws.OPEN) {

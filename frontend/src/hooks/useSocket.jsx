@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { apiWebSocketUrl } from '../api/client';
 
 /**
  * useSocket Hook
@@ -22,10 +23,10 @@ export function useSocket(projectId, token) {
     const connect = useCallback(() => {
         if (!projectId || !token) return;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // USE PROXY (Relative to frontend host)
-        const hostname = window.location.host;
-        const url = `${protocol}//${hostname}/api/v1/session?token=${token}&projectId=${projectId}`;
+        const socketUrl = new URL(apiWebSocketUrl('/session'));
+        socketUrl.searchParams.set('token', token);
+        socketUrl.searchParams.set('projectId', projectId);
+        const url = socketUrl.toString();
 
         console.log('[WS] Connecting to:', url);
         const socket = new WebSocket(url);
