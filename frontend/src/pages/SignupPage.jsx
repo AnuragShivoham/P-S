@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
-import { Shield, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, ArrowRight, Loader2, AlertCircle, CheckCircle2, Building2, BriefcaseBusiness } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
+import { getDashboardPathForRole, getPrimaryRole } from '../utils/roleUtils';
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [otp, setOtp] = useState('');
   const [role, setRole] = useState('student');
+  const [roleProfile, setRoleProfile] = useState({ student: '', citizen: '', employer: '' });
   const [step, setStep] = useState('signup'); // signup, otp
   
   const [loading, setLoading] = useState(false);
@@ -24,13 +26,26 @@ export default function SignupPage() {
     if (token) navigate('/');
   }, [token, navigate]);
 
+  const roleFieldMeta = {
+    student: { label: 'School / College', placeholder: 'e.g. IIT Delhi' },
+    citizen: { label: 'Your community focus', placeholder: 'e.g. Climate, education, health' },
+    employer: { label: 'Company / Organization', placeholder: 'e.g. Example Technologies' },
+  };
+
   const handleSendOtp = async () => {
     if (!email) return setError('Email is required');
     if (!name) return setError('Name is required');
+    if (!roleProfile[role]) return setError(`${roleFieldMeta[role].label} is required`);
     setLoading(true);
     setError('');
     try {
-      const res = await api.sendOtp(email, 'signup');
+      const res = await api.sendOtp(email, 'signup', {
+        profile: {
+          role,
+          signup_detail: roleProfile[role] || '',
+          selected_role: role,
+        },
+      });
       setMsg(res.message);
       setStep('otp');
     } catch (e) {
@@ -43,18 +58,17 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.loginGoogle(response.credential, role);
+      const res = await api.loginGoogle(response.credential, role, {
+        role,
+        signup_detail: roleProfile[role] || '',
+        selected_role: role,
+      });
       setAuth(res.user, res.token);
-      if (res.user.role === 'citizen') {
-        navigate('/citizen-dashboard');
-      } else if (res.user.role === 'mentor' || res.user.role === 'university') {
-        navigate('/mentor');
-      } else if (res.user.role === 'admin') {
-        navigate('/admin');
-      } else if (!res.user.onboarded) {
+      const activeRole = getPrimaryRole(res.user);
+      if (!res.user.onboarded && activeRole !== 'admin' && activeRole !== 'mentor' && activeRole !== 'university') {
         navigate('/onboarding');
       } else {
-        navigate('/projects');
+        navigate(getDashboardPathForRole(activeRole));
       }
     } catch (e) {
       setError(e.message);
@@ -64,21 +78,23 @@ export default function SignupPage() {
 
   const handleVerifyOtp = async () => {
     if (!otp) return setError('OTP is required');
+    if (!roleProfile[role]) return setError(`${roleFieldMeta[role].label} is required`);
     setLoading(true);
     setError('');
     try {
-      const res = await api.verifyOtp(email, otp, name, role, 'signup');
+      const res = await api.verifyOtp(email, otp, name, role, 'signup', {
+        profile: {
+          role,
+          signup_detail: roleProfile[role] || '',
+          selected_role: role,
+        },
+      });
       setAuth(res.user, res.token);
-      if (res.user.role === 'citizen') {
-        navigate('/citizen-dashboard');
-      } else if (res.user.role === 'mentor' || res.user.role === 'university') {
-        navigate('/mentor');
-      } else if (res.user.role === 'admin') {
-        navigate('/admin');
-      } else if (!res.user.onboarded) {
+      const activeRole = getPrimaryRole(res.user);
+      if (!res.user.onboarded && activeRole !== 'admin' && activeRole !== 'mentor' && activeRole !== 'university') {
         navigate('/onboarding');
       } else {
-        navigate('/projects');
+        navigate(getDashboardPathForRole(activeRole));
       }
     } catch (e) {
       setError(e.message);
@@ -114,7 +130,7 @@ export default function SignupPage() {
         {step === 'signup' && (
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
-              <label className="lbl">Role Selection — admin accounts sign in from the Admin option</label>
+              <label className="lbl">Role Selection — choose the role for this account</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setRole('student')}
@@ -131,20 +147,21 @@ export default function SignupPage() {
                   🌍 Citizen
                 </button>
                 <button
-                  onClick={() => setRole('mentor')}
-                  className={`btn ${role === 'mentor' ? 'btn-p' : 'btn-g'}`}
+                  onClick={() => navigate('/signup?role=university')}
+                  className="btn btn-g"
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
-                  <Shield size={13} /> Mentor
+                  <Building2 size={13} /> University
                 </button>
                 <button
-                  onClick={() => setRole('university')}
-                  className={`btn ${role === 'university' ? 'btn-p' : 'btn-g'}`}
+                  onClick={() => setRole('employer')}
+                  className={`btn ${role === 'employer' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
                 >
-                  🎓 University
+                  <BriefcaseBusiness size={13} /> Company
                 </button>
               </div>
+              <p style={{ color: 'var(--tx-2)', fontSize: 11, margin: '8px 0 0' }}>{role === 'employer' ? 'Company accounts can create an employer profile and access employer features.' : 'Select a role to continue. University registration requires administrator approval.'}</p>
             </div>
 
             {role !== 'admin' && (
@@ -180,6 +197,19 @@ export default function SignupPage() {
                 onChange={e => setName(e.target.value)}
               />
             </div>
+
+            {role !== 'admin' && (
+              <div style={{ marginBottom: 16 }}>
+                <label className="lbl">{roleFieldMeta[role]?.label}</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={roleFieldMeta[role]?.placeholder}
+                  value={roleProfile[role] || ''}
+                  onChange={(e) => setRoleProfile(prev => ({ ...prev, [role]: e.target.value }))}
+                />
+              </div>
+            )}
 
             <div style={{ marginBottom: 20 }}>
               <label className="lbl">Email Address</label>

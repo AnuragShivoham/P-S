@@ -3,17 +3,31 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/database');
 const architectureGenerator = require('../engines/architectureGenerator');
+const { requireRole } = require('../middleware/role_middleware');
+const { requireProjectPermission } = require('../middleware/projectAccess');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[ProjectExtensions Route Error]', e.message);
   res.status(500).json({ error: e.message });
 });
 
+function projectAccess(req, res, projectId, write = false) {
+  const permission = requireProjectPermission(req.user, projectId, write);
+  if (!permission.project) {
+    res.status(404).json({ error: 'Project not found.' });
+    return false;
+  }
+  if (permission.allowed) return true;
+  res.status(403).json({ error: write ? 'Project owner has not granted edit permission.' : 'Project access has not been shared with your account.' });
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ARCHITECTURE
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/:id/architecture', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id)) return;
   const architectures = architectureGenerator.getProjectArchitectures(req.params.id);
   const project = db.prepare('SELECT id, title, architecture_version FROM projects WHERE id = ?').get(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -26,6 +40,7 @@ router.get('/:id/architecture', wrap(async (req, res) => {
 }));
 
 router.post('/:id/architecture/generate', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id, true)) return;
   const { notes = '' } = req.body;
   const result = await architectureGenerator.generateArchitecture(req.params.id, notes);
   res.status(201).json({
@@ -35,6 +50,7 @@ router.post('/:id/architecture/generate', wrap(async (req, res) => {
 }));
 
 router.post('/:id/architecture/approve', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id, true)) return;
   const { version } = req.body;
   if (!version) return res.status(400).json({ error: 'Version is required' });
 
@@ -51,16 +67,13 @@ router.post('/:id/architecture/approve', wrap(async (req, res) => {
 
 router.get('/:id/team', wrap(async (req, res) => {
   const projectId = req.params.id;
-  let team = db.prepare('SELECT * FROM project_teams WHERE project_id = ?').get(projectId);
-  if (!team) {
-    const teamId = `team_${uuidv4()}`;
-    db.prepare('INSERT INTO project_teams (id, project_id, name) VALUES (?, ?, ?)')
-      .run(teamId, projectId, 'Engineering Team');
-    team = db.prepare('SELECT * FROM project_teams WHERE id = ?').get(teamId);
-  }
+  if (!projectAccess(req, res, projectId)) return;
+  const team = db.prepare('SELECT * FROM project_teams WHERE project_id = ?').get(projectId);
+  if (!team) return res.json({ team: null, members: [] });
 
   const members = db.prepare(`
-    SELECT m.*, u.name, u.email, u.role as user_platform_role, u.avatar,
+        SELECT m.id, m.team_id, m.user_id, m.role, m.assigned_task_id, m.status, m.access_level, m.created_at,
+          u.name, u.avatar,
            t.title as assigned_task_title, t.status as assigned_task_status
     FROM project_team_members m
     JOIN users u ON m.user_id = u.id
@@ -77,7 +90,12 @@ router.get('/:id/team', wrap(async (req, res) => {
 
 router.post('/:id/team/invite', wrap(async (req, res) => {
   const projectId = req.params.id;
-  const { user_id, email, role = 'Frontend Developer' } = req.body;
+  if (!projectAccess(req, res, projectId, true)) return;
+  const { user_id, email, role = 'Frontend Developer', access_level = 'read' } = req.body;
+  if (!['read', 'write'].includes(access_level)) return res.status(400).json({ error: 'access_level must be read or write.' });
+  if (req.user.id !== db.prepare('SELECT user_id FROM projects WHERE id = ?').get(projectId)?.user_id) {
+    return res.status(403).json({ error: 'Only the project owner can invite collaborators and assign access.' });
+  }
 
   let targetUserId = user_id;
   if (!targetUserId && email) {
@@ -96,32 +114,59 @@ router.post('/:id/team/invite', wrap(async (req, res) => {
     team = db.prepare('SELECT * FROM project_teams WHERE id = ?').get(teamId);
   }
 
+  if (!db.prepare('SELECT id FROM users WHERE id = ?').get(targetUserId)) return res.status(404).json({ error: 'User not found.' });
+  if (targetUserId === req.user.id) return res.status(400).json({ error: 'You already own this project.' });
+  if (req.body.institution_id) {
+    const membership = db.prepare("SELECT 1 FROM institution_memberships WHERE institution_id = ? AND user_id = ? AND status = 'active'")
+      .get(req.body.institution_id, targetUserId);
+    if (!membership) return res.status(403).json({ error: 'The invited collaborator must be an active member of the selected institution.' });
+  }
   const memberId = `tm_${uuidv4()}`;
-  db.prepare(`
-    INSERT INTO project_team_members (id, team_id, user_id, role, status, created_at)
-    VALUES (?, ?, ?, ?, 'active', datetime('now'))
-  `).run(memberId, team.id, targetUserId, role);
+  try { db.prepare(`
+    INSERT INTO project_team_members (id, team_id, user_id, role, status, access_level, created_at)
+    VALUES (?, ?, ?, ?, 'active', ?, datetime('now'))
+  `).run(memberId, team.id, targetUserId, role, access_level);
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) return res.status(409).json({ error: 'User already has project access.' });
+    throw error;
+  }
 
   res.status(201).json({ message: 'Team member added successfully', memberId });
 }));
 
 router.patch('/:id/team/member/:memberId', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id, true)) return;
+  if (req.user.id !== db.prepare('SELECT user_id FROM projects WHERE id = ?').get(req.params.id)?.user_id) {
+    return res.status(403).json({ error: 'Only the project owner can manage collaborators and access levels.' });
+  }
   const { memberId } = req.params;
-  const { role, assigned_task_id, status } = req.body;
+  const { role, assigned_task_id, status, access_level } = req.body;
+  if (access_level !== undefined && !['read', 'write'].includes(access_level)) return res.status(400).json({ error: 'access_level must be read or write.' });
+  if (assigned_task_id) {
+    const task = db.prepare(`SELECT t.id FROM tasks t JOIN milestones m ON m.id = t.milestone_id
+      WHERE t.id = ? AND m.project_id = ?`).get(assigned_task_id, req.params.id);
+    if (!task) return res.status(400).json({ error: 'Assigned task must belong to this project.' });
+  }
 
   db.prepare(`
     UPDATE project_team_members SET
       role = COALESCE(?, role),
       assigned_task_id = COALESCE(?, assigned_task_id),
-      status = COALESCE(?, status)
+      status = COALESCE(?, status),
+      access_level = COALESCE(?, access_level)
     WHERE id = ?
-  `).run(role || null, assigned_task_id || null, status || null, memberId);
+      AND team_id IN (SELECT id FROM project_teams WHERE project_id = ?)
+  `).run(role || null, assigned_task_id || null, status || null, access_level || null, memberId, req.params.id);
 
   res.json({ success: true, message: 'Team member updated' });
 }));
 
 router.delete('/:id/team/member/:memberId', wrap(async (req, res) => {
-  db.prepare('DELETE FROM project_team_members WHERE id = ?').run(req.params.memberId);
+  if (!projectAccess(req, res, req.params.id, true)) return;
+  if (req.user.id !== db.prepare('SELECT user_id FROM projects WHERE id = ?').get(req.params.id)?.user_id) {
+    return res.status(403).json({ error: 'Only the project owner can remove collaborators.' });
+  }
+  db.prepare('DELETE FROM project_team_members WHERE id = ? AND team_id IN (SELECT id FROM project_teams WHERE project_id = ?)').run(req.params.memberId, req.params.id);
   res.json({ success: true, message: 'Member removed from team' });
 }));
 
@@ -131,6 +176,7 @@ router.delete('/:id/team/member/:memberId', wrap(async (req, res) => {
 
 router.get('/:id/requirements', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId)) return;
   const requirements = db.prepare(`
     SELECT r.*,
            (SELECT COUNT(*) FROM requirement_tasks WHERE requirement_id = r.id) as linked_tasks_count,
@@ -147,6 +193,7 @@ router.get('/:id/requirements', wrap(async (req, res) => {
 
 router.post('/:id/requirements', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId, true)) return;
   const { title, description = '', priority = 'must', source_type = 'project_requirement' } = req.body;
 
   if (!title) return res.status(400).json({ error: 'Requirement title required' });
@@ -166,6 +213,7 @@ router.post('/:id/requirements', wrap(async (req, res) => {
 
 router.get('/:id/impact', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId)) return;
   const metrics = db.prepare('SELECT * FROM impact_metrics WHERE project_id = ? ORDER BY updated_at DESC').all(projectId);
   const project = db.prepare('SELECT id, title, status FROM projects WHERE id = ?').get(projectId);
 
@@ -177,6 +225,7 @@ router.get('/:id/impact', wrap(async (req, res) => {
 
 router.post('/:id/impact', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId, true)) return;
   const {
     metric_type,
     label,
@@ -206,6 +255,7 @@ router.post('/:id/impact', wrap(async (req, res) => {
 
 router.get('/:id/collaboration/session', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId)) return;
   const activeSession = db.prepare(`
     SELECT s.*, u.name as host_name
     FROM collaboration_sessions s
@@ -234,7 +284,16 @@ router.get('/:id/collaboration/session', wrap(async (req, res) => {
 router.post('/:id/collaboration/session', wrap(async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId, true)) return;
   const { title = 'Team Coding Session', task_id = null, live_share_url = '', permission_mode = 'full' } = req.body;
+  if (task_id) {
+    const task = db.prepare(`SELECT t.id FROM tasks t JOIN milestones m ON m.id = t.milestone_id
+      WHERE t.id = ? AND m.project_id = ?`).get(task_id, projectId);
+    const courseTask = db.prepare(`SELECT id FROM course_tasks WHERE id = ? AND EXISTS (
+      SELECT 1 FROM projects p WHERE p.id = ? AND p.course_id = course_tasks.course_id
+    )`).get(task_id, projectId);
+    if (!task && !courseTask) return res.status(400).json({ error: 'Task must belong to this project.' });
+  }
 
   const sessionId = `collab_${uuidv4()}`;
   const generatedShareUrl = live_share_url || `https://prod.liveshare.vsengsaas.visualstudio.com/join?${sessionId}`;
@@ -261,16 +320,18 @@ router.post('/:id/collaboration/session', wrap(async (req, res) => {
 }));
 
 router.patch('/:id/collaboration/session/:sessionId', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id, true)) return;
   const { sessionId } = req.params;
   const { status = 'ended', live_share_url } = req.body;
 
-  db.prepare(`
+  const result = db.prepare(`
     UPDATE collaboration_sessions SET
       status = ?,
       live_share_url = COALESCE(?, live_share_url),
       ended_at = CASE WHEN ? = 'ended' THEN datetime('now') ELSE ended_at END
-    WHERE id = ?
-  `).run(status, live_share_url || null, status, sessionId);
+    WHERE id = ? AND project_id = ?
+  `).run(status, live_share_url || null, status, sessionId, req.params.id);
+  if (!result.changes) return res.status(404).json({ error: 'Collaboration session not found for this project.' });
 
   res.json({ success: true, message: 'Session updated' });
 }));
@@ -280,8 +341,8 @@ router.patch('/:id/collaboration/session/:sessionId', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/vscode/project/:id', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id)) return;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
 
   let problem = null;
   if (project.problem_id) {
@@ -322,8 +383,6 @@ router.get('/vscode/project/:id', wrap(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // STUDENT APPLICATIONS (project_student_applications)
 // ─────────────────────────────────────────────────────────────────────────────
-const { requireRole } = require('../middleware/role_middleware');
-
 /**
  * POST /:id/apply — Student applies to join a problem-derived project.
  * Checks project_access_policies: if approval_required = 0 the student is
@@ -337,6 +396,14 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
   const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
   if (!project) return res.status(404).json({ error: 'Project not found.' });
 
+  const policy = db.prepare('SELECT * FROM project_access_policies WHERE project_id = ?').get(projectId);
+  if (policy?.access_mode === 'private') return res.status(403).json({ error: 'This project is private and is not accepting applications.' });
+  if (policy?.institution_id && policy.access_mode === 'institution') {
+    const membership = db.prepare("SELECT 1 FROM institution_memberships WHERE institution_id = ? AND user_id = ? AND status = 'active'")
+      .get(policy.institution_id, studentId);
+    if (!membership) return res.status(403).json({ error: 'Join this institution before applying to its private projects.' });
+  }
+
   // Prevent duplicate application
   const existing = db.prepare(
     "SELECT id FROM project_student_applications WHERE project_id = ? AND student_id = ? AND status != 'withdrawn'"
@@ -346,13 +413,24 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
   }
 
   // Check access policy
-  const policy = db.prepare('SELECT * FROM project_access_policies WHERE project_id = ?').get(projectId);
-  const autoApprove = !policy || policy.approval_required === 0;
+  const autoApprove = !!policy && policy.access_mode === 'public' && policy.approval_required === 0;
 
   const result = db.prepare(`
     INSERT INTO project_student_applications (project_id, student_id, status, message, created_at)
     VALUES (?, ?, ?, ?, datetime('now'))
   `).run(projectId, studentId, autoApprove ? 'approved' : 'pending', message);
+
+  if (autoApprove) {
+    let team = db.prepare('SELECT * FROM project_teams WHERE project_id = ?').get(projectId);
+    if (!team) {
+      const teamId = `team_${uuidv4()}`;
+      db.prepare('INSERT INTO project_teams (id, project_id, name) VALUES (?, ?, ?)').run(teamId, projectId, 'Engineering Team');
+      team = db.prepare('SELECT * FROM project_teams WHERE id = ?').get(teamId);
+    }
+    const memberId = `tm_${uuidv4()}`;
+    db.prepare(`INSERT OR IGNORE INTO project_team_members (id, team_id, user_id, role, status, access_level, created_at)
+      VALUES (?, ?, ?, 'developer', 'active', 'write', datetime('now'))`).run(memberId, team.id, studentId);
+  }
 
   res.status(201).json({
     applicationId: result.lastInsertRowid,
@@ -369,6 +447,7 @@ router.post('/:id/apply', requireRole('student'), wrap(async (req, res) => {
  */
 router.get('/:id/applications', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!projectAccess(req, res, projectId)) return;
   const applications = db.prepare(`
     SELECT psa.*, u.name as student_name, u.email as student_email
     FROM project_student_applications psa
@@ -383,16 +462,21 @@ router.get('/:id/applications', requireRole('mentor', 'university', 'admin'), wr
  * PATCH /:id/applications/:appId — Approve or reject a student application.
  */
 router.patch('/:id/applications/:appId', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id, true)) return;
   const { appId } = req.params;
   const { status } = req.body;
   if (!['approved', 'rejected'].includes(status)) {
     return res.status(400).json({ error: 'status must be approved or rejected.' });
   }
+  if (req.user.id !== db.prepare('SELECT user_id FROM projects WHERE id = ?').get(req.params.id)?.user_id) {
+    return res.status(403).json({ error: 'Only the project owner may decide applications.' });
+  }
   db.prepare(`
     UPDATE project_student_applications
     SET status = ?, reviewed_by = ?, reviewed_at = datetime('now')
-    WHERE id = ?
-  `).run(status, req.user.id, appId);
+    WHERE id = ? AND project_id = ? AND status = 'pending'
+  `).run(status, req.user.id, appId, req.params.id);
+  if (db.prepare('SELECT changes() AS changes').get().changes === 0) return res.status(404).json({ error: 'Pending application not found for this project.' });
   res.json({ success: true, status });
 }));
 
@@ -417,8 +501,23 @@ router.get('/:id/my-application', requireRole('student'), wrap(async (req, res) 
  */
 router.put('/:id/access-policy', requireRole('mentor', 'university', 'admin'), wrap(async (req, res) => {
   const projectId = req.params.id;
+  const permission = requireProjectPermission(req.user, projectId, true);
+  if (!permission.project) return res.status(404).json({ error: 'Project not found.' });
+  if (permission.project.user_id !== req.user.id) return res.status(403).json({ error: 'Only the project owner can change its access policy.' });
   const { access_mode, institution_id, course_id, approval_required = 0, max_team_size } = req.body;
   if (!access_mode) return res.status(400).json({ error: 'access_mode is required.' });
+  if (!['public', 'institution', 'private'].includes(access_mode)) return res.status(400).json({ error: 'access_mode must be public, institution, or private.' });
+  if (access_mode === 'institution') {
+    const institution = db.prepare('SELECT id FROM institutions WHERE id = ?').get(institution_id);
+    if (!institution) return res.status(400).json({ error: 'A valid institution_id is required for institution access.' });
+    const ownsInstitution = db.prepare(`SELECT 1 FROM institutions i
+      LEFT JOIN institution_memberships im ON im.institution_id = i.id AND im.user_id = ? AND im.status = 'active'
+      WHERE i.id = ? AND (i.owner_user_id = ? OR (im.member_type = 'university' AND im.is_institution_admin = 1))`)
+      .get(req.user.id, institution_id, req.user.id);
+    if (!ownsInstitution) return res.status(403).json({ error: 'Only a member university administrator can share to this institution.' });
+  } else if (institution_id) {
+    return res.status(400).json({ error: 'institution_id is only valid when access_mode is institution.' });
+  }
 
   const existing = db.prepare('SELECT project_id FROM project_access_policies WHERE project_id = ?').get(projectId);
   if (existing) {
@@ -426,15 +525,19 @@ router.put('/:id/access-policy', requireRole('mentor', 'university', 'admin'), w
       UPDATE project_access_policies
       SET access_mode = ?, institution_id = ?, course_id = ?, approval_required = ?, max_team_size = ?
       WHERE project_id = ?
-    `).run(access_mode, institution_id || null, course_id || null, approval_required ? 1 : 0, max_team_size || null, projectId);
+    `).run(access_mode, access_mode === 'institution' ? institution_id : null, course_id || null, approval_required ? 1 : 0, max_team_size || null, projectId);
   } else {
     db.prepare(`
       INSERT INTO project_access_policies (project_id, access_mode, institution_id, course_id, approval_required, max_team_size, created_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(projectId, access_mode, institution_id || null, course_id || null, approval_required ? 1 : 0, max_team_size || null);
+    `).run(projectId, access_mode, access_mode === 'institution' ? institution_id : null, course_id || null, approval_required ? 1 : 0, max_team_size || null);
   }
 
   const policy = db.prepare('SELECT * FROM project_access_policies WHERE project_id = ?').get(projectId);
+  db.prepare(`INSERT INTO authorization_audit_log (id, actor_user_id, action, resource_type, resource_id, details)
+    VALUES (?, ?, 'project.access_policy_changed', 'project', ?, ?)`).run(
+    uuidv4(), req.user.id, projectId, JSON.stringify({ access_mode, institution_id: access_mode === 'institution' ? institution_id : null, approval_required: !!approval_required })
+  );
   res.json({ policy });
 }));
 
@@ -442,6 +545,7 @@ router.put('/:id/access-policy', requireRole('mentor', 'university', 'admin'), w
  * GET /:id/access-policy — Retrieve the access policy for a project.
  */
 router.get('/:id/access-policy', wrap(async (req, res) => {
+  if (!projectAccess(req, res, req.params.id)) return;
   const policy = db.prepare('SELECT * FROM project_access_policies WHERE project_id = ?').get(req.params.id);
   res.json({ policy: policy || null });
 }));

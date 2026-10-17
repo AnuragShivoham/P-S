@@ -5,8 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
-    "db:backup": "node scripts/backup_sqlite.js"
+    "dev": "node --watch src/server.js",
+    "db:backup": "node scripts/backup_sqlite.js",
+    "test:email": "node --test tests/email_service_test.js tests/university_application_email_test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -19,9 +20,6 @@
     "nodemailer": "^10.1.0",
     "uuid": "^11.1.1",
     "ws": "^8.19.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.4"
   },
   "overrides": {
     "qs": "^6.16.0"

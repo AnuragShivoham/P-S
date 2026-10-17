@@ -15,6 +15,8 @@ const { handleConnection, initHeartbeat } = require('./services/socketService');
 const previewRouter = require('./routes/preview');
 const problemsRouter = require('./routes/problems');
 const projectExtensionsRouter = require('./routes/projectExtensions');
+const institutionsRouter = require('./routes/institutions');
+const universityApplicationsRouter = require('./routes/universityApplications');
 const mediaRouter = require('./routes/media');
 const optionalAuth = require('./middleware/optionalAuth');
 
@@ -40,6 +42,8 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'SOCRATES', version: '1.0.0' }));
 app.use('/api/v1/preview', previewRouter);
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/university-applications', universityApplicationsRouter);
+app.use('/api/v1/institutions', authMiddleware, institutionsRouter);
 app.use('/api/v1/media', mediaRouter);
 
 const labourRouter = require('./routes/labourIntelligence');

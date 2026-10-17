@@ -4,6 +4,7 @@ export const useStore = create((set, get) => ({
   userName: localStorage.getItem('ab_uname')|| null,
   token:    localStorage.getItem('ab_token')|| null,
   role:     localStorage.getItem('ab_role') || null,
+  roles:    JSON.parse(localStorage.getItem('ab_roles') || '[]'),
   avatar:   localStorage.getItem('ab_avatar')|| null,
   techStack: JSON.parse(localStorage.getItem('ab_skills') || '[]'),
   onboarded: localStorage.getItem('ab_onboarded') === '1',
@@ -12,10 +13,12 @@ export const useStore = create((set, get) => ({
   chatLog:  [],
 
   setAuth: (user, token) => {
+    const roles = Array.isArray(user.roles) ? user.roles : (user.role ? [user.role] : []);
     localStorage.setItem('ab_uid',   user.id);
     localStorage.setItem('ab_uname', user.name);
     localStorage.setItem('ab_token', token);
     localStorage.setItem('ab_role',  user.role);
+    localStorage.setItem('ab_roles', JSON.stringify(roles));
     localStorage.setItem('ab_onboarded', user.onboarded ? '1' : '0');
     if (user.avatar) localStorage.setItem('ab_avatar', user.avatar);
     if (user.tech_stack) localStorage.setItem('ab_skills', JSON.stringify(user.tech_stack));
@@ -25,6 +28,7 @@ export const useStore = create((set, get) => ({
       userName: user.name, 
       token: token, 
       role: user.role, 
+      roles,
       avatar: user.avatar || null,
       techStack: user.tech_stack || [],
       onboarded: !!user.onboarded,
@@ -50,12 +54,13 @@ export const useStore = create((set, get) => ({
     localStorage.removeItem('ab_uname');
     localStorage.removeItem('ab_token');
     localStorage.removeItem('ab_role');
+    localStorage.removeItem('ab_roles');
     localStorage.removeItem('ab_avatar');
     localStorage.removeItem('ab_skills');
     localStorage.removeItem('ab_pid');
     localStorage.removeItem('ab_tid');
     localStorage.removeItem('ab_onboarded');
-    set({ userId: null, userName: null, token: null, role: null, avatar: null, techStack: [], project: null, milestones: [], currentTask: null, projectId: null, taskId: null, onboarded: false });
+    set({ userId: null, userName: null, token: null, role: null, roles: [], avatar: null, techStack: [], project: null, milestones: [], currentTask: null, projectId: null, taskId: null, onboarded: false });
   },
 
   project:     null,

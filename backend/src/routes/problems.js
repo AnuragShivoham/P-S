@@ -161,6 +161,10 @@ router.get('/', wrap(async (req, res) => {
   const conditions = [];
   const params = [];
 
+  if (status === 'all' && !['admin', 'mentor', 'university'].includes(req.user?.role)) {
+    return res.status(403).json({ error: 'Only authorized reviewers can browse unpublished challenges.' });
+  }
+
   // Filter by status (default is PUBLISHED for public marketplace)
   if (status === 'all') {
     // Admin or mentor browsing all non-archived
@@ -552,8 +556,9 @@ router.patch('/:id', requireRole('citizen', 'admin', 'mentor', 'university'), wr
 
   const isAuthor = req.user && req.user.id === problem.user_id;
   const isAdmin = req.user && req.user.role === 'admin';
+  const isReviewer = req.user && ['mentor', 'university'].includes(req.user.role);
 
-  if (!isAuthor && !isAdmin) {
+  if (!isAuthor && !isAdmin && !isReviewer) {
     return res.status(403).json({ error: 'Not authorized to edit this problem.' });
   }
 
@@ -582,6 +587,10 @@ router.patch('/:id', requireRole('citizen', 'admin', 'mentor', 'university'), wr
     expected_impact = problem.expected_impact,
     status = problem.status
   } = req.body;
+
+  if (!isAdmin && !isReviewer && status !== problem.status) {
+    return res.status(403).json({ error: 'Only an authorized reviewer can change challenge status.' });
+  }
 
   db.prepare(`
     UPDATE societal_problems SET
@@ -630,6 +639,10 @@ router.delete('/:id', requireRole('citizen', 'admin'), wrap(async (req, res) => 
 // POST /:id/analyze — Trigger or re-run AI problem intelligence
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/analyze', wrap(async (req, res) => {
+  const problem = db.prepare('SELECT id, user_id, status FROM societal_problems WHERE id = ?').get(req.params.id);
+  if (!problem) return res.status(404).json({ error: 'Problem not found.' });
+  const canAnalyze = req.user && (req.user.role === 'admin' || req.user.role === 'mentor' || req.user.role === 'university' || problem.user_id === req.user.id);
+  if (!canAnalyze) return res.status(403).json({ error: 'Problem owner or authorized reviewer access required.' });
   const problemIntelligence = require('../engines/problemIntelligence');
   const result = await problemIntelligence.analyzeProblem(req.params.id);
   res.json({
@@ -642,7 +655,7 @@ router.post('/:id/analyze', wrap(async (req, res) => {
 // POST /:id/review — Review problem (Admin or Mentor)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/review', wrap(async (req, res) => {
-  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'mentor')) {
+  if (!req.user || !['admin', 'mentor', 'university'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Review permission required.' });
   }
 
@@ -679,13 +692,16 @@ router.post('/:id/review', wrap(async (req, res) => {
 // POST /:id/publish — Publish approved problem to marketplace
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/:id/publish', wrap(async (req, res) => {
-  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'mentor')) {
+  if (!req.user || !['admin', 'mentor', 'university'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Publish permission required.' });
   }
 
   const problemId = req.params.id;
   const problem = db.prepare('SELECT * FROM societal_problems WHERE id = ?').get(problemId);
   if (!problem) return res.status(404).json({ error: 'Problem not found' });
+  if (problem.status !== 'APPROVED' && problem.status !== 'PUBLISHED') {
+    return res.status(409).json({ error: 'Only approved challenges can be published.' });
+  }
 
   db.prepare("UPDATE societal_problems SET status = 'PUBLISHED', updated_at = datetime('now') WHERE id = ?")
     .run(problemId);

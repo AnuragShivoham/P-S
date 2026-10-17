@@ -14,7 +14,7 @@ async function req(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   
-  const opts = { method, headers };
+  const opts = { method, headers, cache: 'no-store' };
   if (body) opts.body = JSON.stringify(body);
   console.log(`[API] ${method} ${path}`, body || '');
   const r = await fetch(apiUrl(path), opts);
@@ -105,12 +105,42 @@ export const api = {
   submitCommunityProject: (data) => post('/projects/community/submit', data),
 
   // Auth
-  sendOtp: (email, action) => post('/auth/send-otp', { email, action }),
-  verifyOtp: (email, otp, name, role, action) => post('/auth/verify-otp', { email, otp, name, role, action }),
+  sendOtp: (email, action, extra = {}) => post('/auth/send-otp', { email, action, ...extra }),
+  verifyOtp: (email, otp, name, role, action, extra = {}) => post('/auth/verify-otp', { email, otp, name, role, action, ...extra }),
   loginAdmin: (email, password) => post('/auth/admin-login', { email, password }),
-  loginGoogle: (credential, role) => post('/auth/google', { credential, role }),
+  loginGoogle: (credential, role, profile = {}) => post('/auth/google', { credential, role, profile }),
+  submitUniversityApplication: (data) => post('/university-applications', data),
+  getUniversityRegistration: (token) => get(`/university-applications/registration/${encodeURIComponent(token)}`),
+  adminGetUniversityApplications: () => get('/university-applications/admin'),
+  adminDecideUniversityApplication: (id, decision) => post(`/university-applications/admin/${encodeURIComponent(id)}/decision`, { decision }),
+  logout: async () => { localStorage.removeItem('ab_token'); },
   updateRole: (role) => req('PUT', '/auth/role', { role }),
   getMe: () => get('/auth/me'),
+  createInstitution: (data) => post('/institutions', data),
+  getMyInstitution: () => get('/institutions/me'),
+  joinInstitution: (slug) => post('/institutions/join', { slug }),
+  updateInstitution: (id, data) => req('PATCH', `/institutions/${id}`, data),
+  shareProjectWithInstitution: (institutionId, projectId, approval_required = true) => req('PUT', `/institutions/${institutionId}/projects/${projectId}/share`, { approval_required }),
+  revokeInstitutionProjectShare: (institutionId, projectId) => req('DELETE', `/institutions/${institutionId}/projects/${projectId}/share`),
+  getMyInstitutionMemberships: () => get('/institutions/membership/me'),
+  getInstitutionDashboard: (id) => get(`/institutions/${id}/dashboard`),
+  getInstitutionMembers: (id, status = 'pending') => get(`/institutions/${id}/members?status=${encodeURIComponent(status)}`),
+  reviewInstitutionMembership: (id, membershipId, status, department_id = null) => req('PATCH', `/institutions/${id}/members/${membershipId}`, { status, department_id }),
+  createInstitutionDepartment: (id, data) => post(`/institutions/${id}/departments`, data),
+  deleteInstitutionDepartment: (id, departmentId) => req('DELETE', `/institutions/${id}/departments/${departmentId}`),
+  getInstitutionReportUrl: (id) => apiUrl(`/institutions/${id}/report.csv`),
+  downloadInstitutionReport: async (id) => {
+    const token = localStorage.getItem('ab_token');
+    const response = await fetch(apiUrl(`/institutions/${id}/report.csv`), {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${response.status}`);
+    }
+    return response.blob();
+  },
+  getInstitutionAudit: (id) => get(`/institutions/${id}/audit`),
 
   // V2 Course API
   getCourses: () => get('/courses'),
@@ -144,6 +174,7 @@ export const api = {
   adminGetStats: () => get('/admin/stats'),
   adminGetUsers: () => get('/admin/users'),
   adminUpdateUserRole: (id, role) => req('PUT', `/admin/users/${id}/role`, { role }),
+  adminRevokeUserRole: (id, role) => req('DELETE', `/admin/users/${id}/role/${encodeURIComponent(role)}`),
   getPublicExtensions: () => get('/extensions/public'),
 
   // Societal Problems API
@@ -209,6 +240,10 @@ export const api = {
   ingestLabourSignal: (data) => post('/labour/signals/ingest', data),
   getLabourSignals: () => get('/labour/signals'),
   getLabourSignal: (id) => get(`/labour/signals/${id}`),
+  getLabourSourceFeeds: () => get('/labour/admin/source-feeds'),
+  createLabourSourceFeed: (data) => post('/labour/admin/source-feeds', data),
+  runLabourSourceFeed: (id, data = {}) => post(`/labour/admin/source-feeds/${id}/run`, data),
+  getLabourSourceRuns: () => get('/labour/admin/source-ingestion-runs'),
   getSkillsOntology: () => get('/labour/ontology/skills'),
   getRolesOntology: () => get('/labour/ontology/roles'),
   normalizeSkillText: (raw_text) => post('/labour/ontology/normalize', { raw_text }),
@@ -237,6 +272,17 @@ export const api = {
     return get(qs ? `/labour/employer/candidates?${qs}` : '/labour/employer/candidates');
   },
   submitEmployerFeedback: (data) => post('/labour/employer/feedback', data),
-  getInstitutionCurriculumAnalysis: () => get('/labour/institution/curriculum-analysis')
+  getInstitutionCurriculumAnalysis: () => get('/labour/institution/curriculum-analysis'),
+
+  // Scoped Labour Intelligence v2 APIs
+  getLabourProviderHealth: () => get('/labour/health/provider'),
+  getMarketTrends: (roleId) => get(roleId ? `/labour/market/trends?role_id=${encodeURIComponent(roleId)}` : '/labour/market/trends'),
+  getStudentLabourProfile: () => get('/labour/student/profile'),
+  analyzeStudentGap: (data) => post('/labour/student/gap-analysis', data),
+  upgradeStudentProject: (data) => post('/labour/student/upgrade-project', data),
+  getInstitutionLabourAnalytics: () => get('/labour/institution/analytics'),
+  getEmployerRequisitions: () => get('/labour/employer/requisitions'),
+  createEmployerRequisition: (data) => post('/labour/employer/requisitions', data),
+  triggerFeedIngestion: (id, rawContent) => post(`/labour/admin/source-feeds/${id}/trigger`, { raw_content: rawContent })
 };
 

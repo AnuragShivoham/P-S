@@ -1,46 +1,68 @@
-import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { useState, useEffect, lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate, useSearchParams } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LogOut, User } from 'lucide-react';
 import { useStore } from './store';
 import { api } from './api/client';
+import { getDashboardPathForRole, getPrimaryRole } from './utils/roleUtils';
 import { StatusBadge, ProgressBar, Spinner } from './components/UI';
-import GoalPage from './pages/GoalPage';
-import ClarifyPage from './pages/ClarifyPage';
-import DashboardPage from './pages/DashboardPage';
-import CompletePage from './pages/CompletePage';
-import IdePage from './pages/IdePage';
+
+// ── Core/auth pages — eagerly loaded (always needed immediately)
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
-import SetupPage from './pages/SetupPage';
-import PlanConfirmationPage from './pages/PlanConfirmationPage';
 
-import ProjectsPage from './pages/ProjectsPage';
+// ── Lazy-loaded routes — only downloaded when navigated to
+const GoalPage = lazy(() => import('./pages/GoalPage'));
+const ClarifyPage = lazy(() => import('./pages/ClarifyPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const CompletePage = lazy(() => import('./pages/CompletePage'));
+const IdePage = lazy(() => import('./pages/IdePage'));
+const SetupPage = lazy(() => import('./pages/SetupPage'));
+const PlanConfirmationPage = lazy(() => import('./pages/PlanConfirmationPage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const MentorPage = lazy(() => import('./pages/MentorPage'));
+const MarketplacePage = lazy(() => import('./pages/MarketplacePage'));
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
+const CourseBuilderPage = lazy(() => import('./pages/CourseBuilderPage'));
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 
-import MentorPage from './pages/MentorPage';
-import MarketplacePage from './pages/MarketplacePage';
-import ProjectDetailPage from './pages/ProjectDetailPage';
-import CourseBuilderPage from './pages/CourseBuilderPage';
-import AdminPage from './pages/AdminPage';
-import OnboardingPage from './pages/OnboardingPage';
+// ── Societal Problems Feature — lazy loaded
+const SocietalProblemsPage = lazy(() => import('./pages/SocietalProblemsPage'));
+const ProblemSubmitPage = lazy(() => import('./pages/ProblemSubmitPage'));
+const ProblemDetailPage = lazy(() => import('./pages/ProblemDetailPage'));
+const ProjectArchitecturePage = lazy(() => import('./pages/ProjectArchitecturePage'));
+const ProjectTeamPage = lazy(() => import('./pages/ProjectTeamPage'));
+const ProjectRequirementsPage = lazy(() => import('./pages/ProjectRequirementsPage'));
+const ProjectImpactPage = lazy(() => import('./pages/ProjectImpactPage'));
+const CitizenDashboardPage = lazy(() => import('./pages/CitizenDashboardPage'));
 
-// Societal Problems Feature
-import SocietalProblemsPage from './pages/SocietalProblemsPage';
-import ProblemSubmitPage from './pages/ProblemSubmitPage';
-import ProblemDetailPage from './pages/ProblemDetailPage';
-import ProjectArchitecturePage from './pages/ProjectArchitecturePage';
-import ProjectTeamPage from './pages/ProjectTeamPage';
-import ProjectRequirementsPage from './pages/ProjectRequirementsPage';
-import ProjectImpactPage from './pages/ProjectImpactPage';
-import CitizenDashboardPage from './pages/CitizenDashboardPage';
+// ── Labour-Market Intelligence — lazy loaded (heaviest feature)
+const LabourMarketPage = lazy(() => import('./pages/LabourMarketPage'));
+const UniversityDashboardPage = lazy(() => import('./pages/UniversityDashboardPage'));
+const UniversitySignupPage = lazy(() => import('./pages/UniversitySignupPage'));
 
-// Labour-Market Intelligence & Competency Alignment
-import LabourMarketPage from './pages/LabourMarketPage';
+// Thin page-level loading fallback
+function PageLoader() {
+  return (
+    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+      <Spinner />
+      <span style={{ color: 'var(--tx-2)', fontSize: 13 }}>Loading…</span>
+    </div>
+  );
+}
+
+function SignupEntry() {
+  const [searchParams] = useSearchParams();
+  const isUniversityFlow = searchParams.has('university_token') || searchParams.get('role') === 'university';
+  return isUniversityFlow ? <UniversitySignupPage /> : <SignupPage />;
+}
 
 function Header() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { project, projectId, userName, token, avatar, logout, role } = useStore();
+  const { project, projectId, userName, token, avatar, logout, role, roles } = useStore();
+  const activeRole = getPrimaryRole({ role, roles });
   const onDash = location.pathname === '/dashboard';
   const onLogin = location.pathname === '/login' || location.pathname === '/signup';
 
@@ -55,7 +77,7 @@ function Header() {
 
   return (
     <header className="hdr">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate(role === 'mentor' ? '/mentor' : '/projects')}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate(getDashboardPathForRole(activeRole))}>
         <div className="logo">SOCRATES</div>
         <div className="logo-sub">AI Development Hub</div>
       </div>
@@ -63,33 +85,34 @@ function Header() {
       {token && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16 }}>
           {/* Citizen role nav */}
-          {role === 'citizen' && (
+          {activeRole === 'citizen' && (
             <>
               <button onClick={() => navigate('/citizen-dashboard')} style={navBtn('My Problems', '/citizen-dashboard')}>📋 My Problems</button>
               <button onClick={() => navigate('/problems/submit')} style={navBtn('Submit', '/problems/submit')}>➕ Submit Problem</button>
             </>
           )}
           {/* Student role nav */}
-          {role === 'student' && (
+          {activeRole === 'student' && (
             <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Projects</button>
           )}
-          {role === 'student' && projectId && (
+          {activeRole === 'student' && projectId && (
             <button onClick={() => navigate('/dashboard')} style={navBtn('Dashboard', '/dashboard')}>Dashboard</button>
           )}
           {/* Societal Problems — visible to student, mentor, university, admin */}
-          {(role === 'student' || role === 'mentor' || role === 'university' || role === 'admin') && (
+          {(activeRole === 'student' || activeRole === 'mentor' || activeRole === 'university' || activeRole === 'admin') && (
             <button onClick={() => navigate('/problems')} style={navBtn('Problems', '/problems')}>🌍 Problems</button>
           )}
-          {role === 'student' && (
+          {activeRole === 'student' && (
             <button onClick={() => navigate('/marketplace')} style={navBtn('Marketplace', '/marketplace')}>Marketplace</button>
           )}
-          {(role === 'mentor' || role === 'university') && (
+          {(activeRole === 'mentor' || activeRole === 'university') && (
             <>
-              <button onClick={() => navigate('/mentor')} style={navBtn('Intervention', '/mentor')}>Intervention</button>
-              <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>
+              {activeRole === 'mentor' && <button onClick={() => navigate('/mentor')} style={navBtn('Intervention', '/mentor')}>Intervention</button>}
+              {activeRole === 'university' && <button onClick={() => navigate('/university')} style={navBtn('Institution', '/university')}>Institution</button>}
+              {activeRole === 'mentor' && <button onClick={() => navigate('/builder')} style={navBtn('Builder', '/builder')}>Course Builder</button>}
             </>
           )}
-          {role === 'admin' && (
+          {activeRole === 'admin' && (
             <>
               <button onClick={() => navigate('/projects')} style={navBtn('Projects', '/projects')}>Projects</button>
               <button onClick={() => navigate('/admin')} style={navBtn('Admin', '/admin')}>Platform Admin</button>
@@ -144,31 +167,44 @@ function ProtectedRoute({ children }) {
 
 function MentorRoute({ children }) {
   const { token, role } = useStore();
+  const activeRole = getPrimaryRole({ role, roles: useStore((s) => s.roles) });
   if (!token) return <Navigate to="/login" replace />;
-  if (role !== 'mentor' && role !== 'university' && role !== 'admin') return <Navigate to="/projects" replace />;
+  if (activeRole !== 'mentor' && activeRole !== 'university' && activeRole !== 'admin') return <Navigate to="/projects" replace />;
   return children;
 }
 
 function AdminRoute({ children }) {
   const { token, role } = useStore();
+  const activeRole = getPrimaryRole({ role, roles: useStore((s) => s.roles) });
   if (!token) return <Navigate to="/login" replace />;
-  if (role !== 'admin') return <Navigate to="/projects" replace />;
+  if (activeRole !== 'admin') return <Navigate to="/projects" replace />;
   return children;
 }
 
 function CitizenRoute({ children }) {
   const { token, role } = useStore();
+  const activeRole = getPrimaryRole({ role, roles: useStore((s) => s.roles) });
   if (!token) return <Navigate to="/login" replace />;
-  if (role !== 'citizen') return <Navigate to="/" replace />;
+  if (activeRole !== 'citizen') return <Navigate to="/" replace />;
+  return children;
+}
+
+function UniversityRoute({ children }) {
+  const { token, role, roles } = useStore();
+  const activeRole = getPrimaryRole({ role, roles });
+  if (!token) return <Navigate to="/login" replace />;
+  if (activeRole !== 'university') return <Navigate to={getDashboardPathForRole(activeRole)} replace />;
   return children;
 }
 
 function HomeRedirect() {
-  const { token, role } = useStore();
+  const { token, role, roles } = useStore();
+  const activeRole = getPrimaryRole({ role, roles });
   if (!token) return <Navigate to="/login" replace />;
-  if (role === 'admin') return <Navigate to="/admin" replace />;
-  if (role === 'mentor' || role === 'university') return <Navigate to="/mentor" replace />;
-  if (role === 'citizen') return <Navigate to="/citizen-dashboard" replace />;
+  if (activeRole === 'admin') return <Navigate to="/admin" replace />;
+  if (activeRole === 'university') return <Navigate to="/university" replace />;
+  if (activeRole === 'mentor') return <Navigate to="/mentor" replace />;
+  if (activeRole === 'citizen') return <Navigate to="/citizen-dashboard" replace />;
   return <Navigate to="/projects" replace />;
 }
 
@@ -273,49 +309,54 @@ function AppInner() {
     <div className="app">
       <div className="scan" />
       <Header />
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/" element={<HomeRedirect />} />
-        <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
-        <Route path="/goal" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
-        <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
-        <Route path="/setup" element={<ProtectedRoute><SetupPage /></ProtectedRoute>} />
-        <Route path="/confirm-plan" element={<ProtectedRoute><PlanConfirmationPage /></ProtectedRoute>} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupEntry />} />
+          <Route path="/signup/standard" element={<SignupPage />} />
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="/projects" element={<ProtectedRoute><ProjectsPage /></ProtectedRoute>} />
+          <Route path="/goal" element={<ProtectedRoute><GoalPage /></ProtectedRoute>} />
+          <Route path="/clarify" element={<ProtectedRoute><ClarifyPage /></ProtectedRoute>} />
+          <Route path="/setup" element={<ProtectedRoute><SetupPage /></ProtectedRoute>} />
+          <Route path="/confirm-plan" element={<ProtectedRoute><PlanConfirmationPage /></ProtectedRoute>} />
 
-        <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
-        <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+          <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
 
-        <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />
-        <Route path="/mentor" element={<MentorRoute><MentorPage /></MentorRoute>} />
-        <Route path="/builder" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
-        <Route path="/builder/:id" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
-        <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
-        <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
-        <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
-        <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />
+          <Route path="/ide" element={<ProtectedRoute><IdePage /></ProtectedRoute>} />
+          <Route path="/mentor" element={<MentorRoute><MentorPage /></MentorRoute>} />
+          <Route path="/builder" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
+          <Route path="/builder/:id" element={<MentorRoute><CourseBuilderPage /></MentorRoute>} />
+          <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+          <Route path="/university" element={<UniversityRoute><UniversityDashboardPage /></UniversityRoute>} />
+          <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
+          <Route path="/marketplace/:id" element={<ProtectedRoute><ProjectDetailPage /></ProtectedRoute>} />
+          <Route path="/complete" element={<ProtectedRoute><CompletePage /></ProtectedRoute>} />
 
-        {/* ── Societal Problems Feature ─────────────────────────────── */}
-        {/* Public: anyone (logged in or not) can browse */}
-        <Route path="/problems" element={<SocietalProblemsPage />} />
-        {/* Problem submit requires auth */}
-        <Route path="/problems/submit" element={<ProtectedRoute><ProblemSubmitPage /></ProtectedRoute>} />
-        <Route path="/problems/:id" element={<ProblemDetailPage />} />
+          {/* ── Societal Problems Feature ─────────────────────────────── */}
+          {/* Public: anyone (logged in or not) can browse */}
+          <Route path="/problems" element={<SocietalProblemsPage />} />
+          {/* Problem submit requires auth */}
+          <Route path="/problems/submit" element={<ProtectedRoute><ProblemSubmitPage /></ProtectedRoute>} />
+          <Route path="/problems/:id" element={<ProblemDetailPage />} />
 
-        {/* Citizen Dashboard */}
-        <Route path="/citizen-dashboard" element={<CitizenRoute><CitizenDashboardPage /></CitizenRoute>} />
+          {/* Citizen Dashboard */}
+          <Route path="/citizen-dashboard" element={<CitizenRoute><CitizenDashboardPage /></CitizenRoute>} />
 
-        {/* Project Extensions — require auth */}
-        <Route path="/projects/:id/architecture" element={<ProtectedRoute><ProjectArchitecturePage /></ProtectedRoute>} />
-        <Route path="/projects/:id/team" element={<ProtectedRoute><ProjectTeamPage /></ProtectedRoute>} />
-        <Route path="/projects/:id/requirements" element={<ProtectedRoute><ProjectRequirementsPage /></ProtectedRoute>} />
-        <Route path="/projects/:id/impact" element={<ProtectedRoute><ProjectImpactPage /></ProtectedRoute>} />
+          {/* Project Extensions — require auth */}
+          <Route path="/projects/:id/architecture" element={<ProtectedRoute><ProjectArchitecturePage /></ProtectedRoute>} />
+          <Route path="/projects/:id/team" element={<ProtectedRoute><ProjectTeamPage /></ProtectedRoute>} />
+          <Route path="/projects/:id/requirements" element={<ProtectedRoute><ProjectRequirementsPage /></ProtectedRoute>} />
+          <Route path="/projects/:id/impact" element={<ProtectedRoute><ProjectImpactPage /></ProtectedRoute>} />
 
-        {/* ── Labour-Market Intelligence & Competency Alignment ─────── */}
-        <Route path="/labour-intelligence" element={<ProtectedRoute><LabourMarketPage /></ProtectedRoute>} />
+          {/* ── Labour-Market Intelligence & Competency Alignment ─────── */}
+          <Route path="/labour-intelligence" element={<ProtectedRoute><LabourMarketPage /></ProtectedRoute>} />
 
-        <Route path="*" element={<Navigate to="/projects" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Routes>
+      </Suspense>
+
     </div>
   );
 }

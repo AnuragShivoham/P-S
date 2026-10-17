@@ -14,6 +14,7 @@ const WorkspaceService  = require('../services/workspaceService');
 const learningController = require('../engines/learningController');
 const auth = require('../middleware/auth');
 const db = require('../db/database');
+const { requireProjectPermission, requireAssignedMentorProject } = require('../middleware/projectAccess');
 const crypto = require('crypto');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
@@ -201,6 +202,7 @@ router.post('/users', wrap(async (req, res) => {
 }));
 
 router.get('/users/:id', wrap(async (req, res) => {
+  if (!req.user || req.params.id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
   const u = tracker.getUser(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
   res.json(u);
@@ -245,9 +247,11 @@ router.use((req, res, next) => {
 // Helper for project security
 const verifyProjectAccess = (project, user) => {
   if (!project) return false;
-  if (project.user_id === user.id) return true;
-  if (user.role === 'mentor') return true;
-  return false;
+  return requireProjectPermission(user, project.id, false).allowed ||
+    (user.role === 'mentor' && (() => {
+      const current = db.prepare('SELECT requested_mentor_id FROM projects WHERE id = ?').get(project.id);
+      return current?.requested_mentor_id === user.id;
+    })());
 };
 router.post('/goals/submit', wrap(async (req, res) => {
   const { raw_goal } = req.body;
@@ -495,7 +499,7 @@ router.post('/courses/tasks/:id/submit', wrap(async (req, res) => {
   const { projectId } = req.body; // Need to know which session to check
 
   const project = tracker.getProject(projectId);
-  if (!project || project.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  if (!project || project.user_id !== req.user.id || !requireProjectPermission(req.user, projectId, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
   if (!project.is_course) return res.status(400).json({ error: 'Not a course project' });
 
   // Get source-of-truth task rule
@@ -606,6 +610,7 @@ router.get('/projects/latest', wrap(async (req, res) => {
   if (!state || !state.project || state.project.user_id !== userId) return res.json({ project: null });
 
   const { project } = state;
+  if (!requireProjectPermission(req.user, project.id, true).allowed) return res.status(403).json({ error: 'Project owner write access is required to resume.' });
   if (project.status === 'clarifying') {
     return res.json(await recoverIncompleteProject(project));
   }
@@ -806,12 +811,9 @@ router.get('/projects/:id/milestones', wrap(async (req, res) => {
   const p = tracker.getProject(req.params.id);
   if (!p) return res.status(404).json({ error: 'Project not found' });
   
-  const projectOwner = db.prepare('SELECT role FROM users WHERE id = ?').get(p.user_id);
   const isOwner = p.user_id === req.user.id;
-  const isMentorOwner = projectOwner?.role === 'mentor';
-  const isReqMentor = req.user.role === 'mentor';
-  
-  if (!isOwner && !isMentorOwner && !isReqMentor) return res.status(403).json({ error: 'Access denied' });
+  const assignedMentor = req.user.role === 'mentor' && requireAssignedMentorProject(req, res, p.id);
+  if (!isOwner && !requireProjectPermission(req.user, p.id, false).allowed && !assignedMentor) return;
 
   if (p.is_course && p.course_id) {
     const courseMilestones = db.prepare('SELECT * FROM course_milestones WHERE course_id = ? ORDER BY position ASC').all(p.course_id);
@@ -849,19 +851,16 @@ router.get('/projects/:id/conversation', wrap(async (req, res) => {
   const p = tracker.getProject(req.params.id);
   if (!p) return res.status(404).json({ error: 'Project not found' });
   
-  const projectOwner = db.prepare('SELECT role FROM users WHERE id = ?').get(p.user_id);
   const isOwner = p.user_id === req.user.id;
-  const isMentorOwner = projectOwner?.role === 'mentor';
-  const isReqMentor = req.user.role === 'mentor';
-  
-  if (!isOwner && !isMentorOwner && !isReqMentor) return res.status(403).json({ error: 'Access denied' });
+  const assignedMentor = req.user.role === 'mentor' && requireAssignedMentorProject(req, res, p.id);
+  if (!isOwner && !requireProjectPermission(req.user, p.id, false).allowed && !assignedMentor) return;
   res.json(tracker.getConversation(req.params.id, req.user.id, 100));
 }));
 
 router.get('/projects/:id/automations', wrap(async (req, res) => {
   const p = tracker.getProject(req.params.id);
   if (!p) return res.status(404).json({ error: 'Project not found' });
-  if (p.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+  if (!requireProjectPermission(req.user, p.id, false).allowed) return res.status(403).json({ error: 'Access denied' });
   res.json(tracker.getProjectAutomations(req.params.id));
 }));
 
@@ -872,10 +871,15 @@ router.get('/milestones/:id/tasks', wrap(async (req, res) => {
   // Check if this is a V2 Course Milestone
   const cm = db.prepare('SELECT * FROM course_milestones WHERE id = ?').get(req.params.id);
   if (cm) {
+    const courseProject = db.prepare('SELECT id FROM projects WHERE course_id = ? AND is_course = 1 ORDER BY created_at DESC LIMIT 1').get(cm.course_id);
+    const progressProject = courseProject && db.prepare('SELECT project_id FROM course_progress WHERE project_id = ? AND task_id IN (SELECT id FROM course_tasks WHERE milestone_id = ?) LIMIT 1').get(courseProject.id, req.params.id);
+    const projectId = progressProject?.project_id || courseProject?.id;
+    if (!projectId) return res.status(404).json({ error: 'Course milestone is not attached to an active project.' });
+    const permission = requireProjectPermission(req.user, projectId, false);
+    if (!permission.allowed) return res.status(403).json({ error: 'Project access denied.' });
     const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
-    const projectId = userRow?.active_project_id;
+    const progressList = db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND user_id = ?').all(projectId, req.user.id);
     const courseTasks = db.prepare('SELECT * FROM course_tasks WHERE milestone_id = ? ORDER BY position ASC').all(req.params.id);
-    const progressList = projectId ? db.prepare('SELECT * FROM course_progress WHERE project_id = ?').all(projectId) : [];
 
     const tasks = courseTasks.map(ct => {
       const prog = progressList.find(p => p.task_id === ct.id);
@@ -893,7 +897,8 @@ router.get('/milestones/:id/tasks', wrap(async (req, res) => {
     });
     return res.json(tasks);
   }
-  
+  const milestone = tracker.getMilestone(req.params.id);
+  if (!milestone || !requireProjectPermission(req.user, milestone.project_id, false).allowed) return res.status(403).json({ error: 'Project access denied.' });
   res.json(tracker.getMilestoneTasks(req.params.id));
 }));
 
@@ -902,6 +907,8 @@ router.get('/tasks/:id', wrap(async (req, res) => {
   if (ct) {
     const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
     const projectId = userRow?.active_project_id;
+    const project = projectId && db.prepare('SELECT id FROM projects WHERE id = ? AND course_id = ?').get(projectId, ct.course_id);
+    if (!project || !requireProjectPermission(req.user, projectId, false).allowed) return res.status(403).json({ error: 'Course project access denied.' });
     const prog = projectId ? db.prepare('SELECT * FROM course_progress WHERE project_id = ? AND task_id = ?').get(projectId, ct.id) : null;
     
     return res.json({
@@ -922,6 +929,8 @@ router.get('/tasks/:id', wrap(async (req, res) => {
 
   const t = tracker.getTask(req.params.id);
   if (!t) return res.status(404).json({ error: 'Task not found' });
+  const milestone = tracker.getMilestone(t.milestone_id);
+  if (!milestone || !requireProjectPermission(req.user, milestone.project_id, false).allowed) return res.status(403).json({ error: 'Project access denied.' });
   res.json(t);
 }));
 
@@ -938,6 +947,9 @@ router.post('/tasks/:id/start', wrap(async (req, res) => {
       }
       
       if (!projectId) return res.status(400).json({ error: 'Missing projectId' });
+        const project = db.prepare('SELECT id, course_id, user_id FROM projects WHERE id = ?').get(projectId);
+        if (!project || project.course_id !== courseTask.course_id || project.user_id !== req.user.id ||
+          !requireProjectPermission(req.user, projectId, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
 
       // [MEMORY] Sync current task and last action
       const memoryService = require('../services/memoryService');
@@ -995,6 +1007,8 @@ router.post('/tasks/:id/start', wrap(async (req, res) => {
   // V1 Legacy Fallback
   const task = tracker.getTask(taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+  const milestone = tracker.getMilestone(task.milestone_id);
+  if (!milestone || !requireProjectPermission(req.user, milestone.project_id, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
   if (!['pending','failed','submitted'].includes(task.status)) return res.status(400).json({ error: `Cannot start task with status: ${task.status}` });
   const updated = tracker.startTask(task.id);
   const cmds = (updated.commands || []).map(c => `  $ ${c}`).join('\n');
@@ -1006,12 +1020,17 @@ router.post('/tasks/:id/hint', wrap(async (req, res) => {
   const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(taskId);
   
   if (courseTask) {
+    const userRow = db.prepare('SELECT active_project_id FROM users WHERE id = ?').get(req.user.id);
+    const project = userRow?.active_project_id && db.prepare('SELECT id, course_id FROM projects WHERE id = ?').get(userRow.active_project_id);
+    if (!project || project.course_id !== courseTask.course_id || !requireProjectPermission(req.user, project.id, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
     const result = await learningController.processSubmission(req.user.id, taskId, { type: 'hint' });
     return res.json({ action: 'task_guidance', message: result.scaffold, task: courseTask });
   }
 
   const task = tracker.getTask(taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+  const milestone = tracker.getMilestone(task.milestone_id);
+  if (!milestone || !requireProjectPermission(req.user, milestone.project_id, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
   const hint = await guidedExecution.getHint(task, task.attempts || 1);
   const ms = tracker.getMilestone(task.milestone_id);
   if (ms) tracker.logTurn(ms.project_id, 'mentor', hint, 'task_guidance', task.id);
@@ -1038,6 +1057,8 @@ router.post('/tasks/:id/ask', auth, wrap(async (req, res) => {
 
   const p = tracker.getProject(projectId);
   if (!p) return res.status(404).json({ error: 'Project not found' });
+  if (!requireProjectPermission(req.user, projectId, false).allowed &&
+      !(req.user.role === 'mentor' && requireAssignedMentorProject(req, res, projectId))) return;
 
   const currentTaskId = taskId;
   const courseTask = db.prepare('SELECT * FROM course_tasks WHERE id = ?').get(currentTaskId);
@@ -1064,7 +1085,8 @@ router.post('/projects/:id/ask', auth, wrap(async (req, res) => {
 
   const p = tracker.getProject(projectId);
   if (!p) return res.status(404).json({ error: 'Project not found' });
-  if (p.user_id !== req.user.id && req.user.role !== 'mentor') return res.status(403).json({ error: 'Access denied' });
+  if (!requireProjectPermission(req.user, projectId, false).allowed &&
+      !(req.user.role === 'mentor' && requireAssignedMentorProject(req, res, projectId))) return;
 
   // Determine if we are in a task context
   const currentTaskId = p.current_task_id;
@@ -1101,6 +1123,8 @@ router.post('/projects/:id/ask', auth, wrap(async (req, res) => {
 router.post('/projects/:id/chat', auth, wrap(async (req, res) => {
     const { message } = req.body;
     const projectId = req.params.id;
+  if (!requireProjectPermission(req.user, projectId, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
+  if (typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'message is required.' });
     const userId = req.user.id;
     const role = req.user.role === 'mentor' ? 'mentor' : 'student';
 
@@ -1110,12 +1134,16 @@ router.post('/projects/:id/chat', auth, wrap(async (req, res) => {
 
 router.get('/projects/:id/chat', auth, wrap(async (req, res) => {
     const projectId = req.params.id;
+  if (!requireProjectPermission(req.user, projectId, false).allowed &&
+    !(req.user.role === 'mentor' && requireAssignedMentorProject(req, res, projectId))) return;
     const history = db.prepare('SELECT c.*, u.name as userName FROM chat_history c JOIN users u ON c.user_id = u.id WHERE c.project_id = ? ORDER BY c.created_at ASC').all(projectId);
     res.json(history);
 }));
 
 router.get('/projects/:id/progress', wrap(async (req, res) => {
   const projectId = req.params.id;
+  if (!requireProjectPermission(req.user, projectId, false).allowed &&
+      !(req.user.role === 'mentor' && requireAssignedMentorProject(req, res, projectId))) return;
   const memoryService = require('../services/memoryService');
   
   const project = tracker.getProject(projectId);
@@ -1246,6 +1274,8 @@ router.get('/projects/:id/progress', wrap(async (req, res) => {
 }));
 
 router.get('/projects/:id/memory', wrap(async (req, res) => {
+  if (!requireProjectPermission(req.user, req.params.id, false).allowed &&
+      !(req.user.role === 'mentor' && requireAssignedMentorProject(req, res, req.params.id))) return;
   const memoryService = require('../services/memoryService');
   const memory = memoryService.getMemory(req.params.id);
   res.json(memory || { project_id: req.params.id, concepts: [], failures: {}, last_action: 'None' });
@@ -1257,6 +1287,7 @@ router.post('/projects/:id/execute/run', wrap(async (req, res) => {
   const executionService = require('../services/executionService');
   const project = tracker.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!requireProjectPermission(req.user, project.id, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
 
   const activeFilePath = req.body.activeFilePath;
 
@@ -1279,6 +1310,7 @@ router.get('/projects/:id/execute/test', wrap(async (req, res) => {
   const executionService = require('../services/executionService');
   const project = tracker.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!requireProjectPermission(req.user, project.id, false).allowed) return res.status(403).json({ error: 'Project access denied.' });
 
   const pType = executionService.getProjectType(project);
   const instructions = executionService.getTestingInstructions(pType, project.current_task_id);
@@ -1481,6 +1513,8 @@ router.post('/tasks/submit', wrap(async (req, res) => {
 
   let task = tracker.getTask(task_id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+  const taskMilestone = tracker.getMilestone(task.milestone_id);
+  if (!taskMilestone || !requireProjectPermission(req.user, taskMilestone.project_id, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
   if (!['in_progress','failed','submitted'].includes(task.status)) {
     return res.status(400).json({ error: `Cannot submit task with status: ${task.status}` });
   }
@@ -1571,10 +1605,10 @@ router.post('/tasks/submit', wrap(async (req, res) => {
 
 // GET /mentor/queue (Priority Sorted Intervention Queue)
 router.get('/mentor/queue', wrap(async (req, res) => {
-    const userRole = req.user?.role || db.prepare("SELECT role FROM users WHERE id = ?").get(req.user?.id || 'TEST_USER')?.role;
-    if (userRole !== 'mentor') return res.status(403).json({ error: 'Mentors only.' });
+  const userRole = req.user?.role;
+    if (!['mentor', 'admin'].includes(userRole)) return res.status(403).json({ error: 'Mentors and administrators only.' });
 
-    const isAdmin = req.user.role === 'admin';
+  const isAdmin = userRole === 'admin';
     const pendingTasks = db.prepare(`
         SELECT cp.*, u.name as studentName, u.id as studentId, ct.title as taskTitle, ct.file_path, 
                p.tech_stack as projectStack, p.requested_mentor_id,
@@ -1681,6 +1715,11 @@ router.get('/mentor/queue', wrap(async (req, res) => {
 const workspaceService = require('../services/workspaceService');
 router.get('/session/context/:projectId', wrap(async (req, res) => {
     const { projectId } = req.params;
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  if (req.user.role !== 'mentor' && req.user.role !== 'admin') return res.status(403).json({ error: 'Mentor access required.' });
+  const permission = requireProjectPermission(req.user, projectId, false);
+  const assigned = req.user.role === 'mentor' && requireAssignedMentorProject(req, res, projectId);
+  if (!permission.allowed && !assigned) return;
     
     // Check projects table for base info
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
@@ -1742,7 +1781,9 @@ router.get('/session/context/:projectId', wrap(async (req, res) => {
 // POST /mentor/join (Lock the session)
 router.post('/mentor/join', wrap(async (req, res) => {
     const { projectId, mode = 'live' } = req.body;
-    const userId = req.user?.id || 'TEST_USER';
+  const userId = req.user?.id;
+  if (!req.user || req.user.role !== 'mentor') return res.status(403).json({ error: 'Mentor access required.' });
+  if (!requireAssignedMentorProject(req, res, projectId)) return;
     
     // Check if it's a course project first (for V2 engine)
     const projectRec = db.prepare('SELECT is_course FROM projects WHERE id = ?').get(projectId);
@@ -1771,6 +1812,7 @@ router.post('/mentor/join', wrap(async (req, res) => {
 // POST /task/help (Student flags themselves manually)
 router.post('/task/help', wrap(async (req, res) => {
     const { projectId, targetMentorId } = req.body;
+  if (!requireProjectPermission(req.user, projectId, true).allowed) return res.status(403).json({ error: 'Project write access required.' });
     
     // Check projects table (Now unified source for SOS)
     const p = db.prepare('SELECT help_requested, last_help_request, requested_mentor_id FROM projects WHERE id = ?').get(projectId);
@@ -1811,7 +1853,8 @@ router.get('/mentors', auth, wrap(async (req, res) => {
 // POST /mentor/hint (Submit a hint in hint-mode)
 router.post('/mentor/hint', wrap(async (req, res) => {
     const { projectId, hint } = req.body;
-    const userId = req.user?.id || 'TEST_USER';
+  const userId = req.user?.id;
+  if (!req.user || req.user.role !== 'mentor' || !requireAssignedMentorProject(req, res, projectId)) return;
     
     const p = db.prepare('SELECT active_mentor_id FROM projects WHERE id = ?').get(projectId);
     if (!p || p.active_mentor_id !== userId) {
@@ -1829,7 +1872,8 @@ router.post('/mentor/hint', wrap(async (req, res) => {
 // POST /mentor/leave (Unlock the session, drop to guided)
 router.post('/mentor/leave', wrap(async (req, res) => {
     const { projectId } = req.body;
-    const userId = req.user?.id || 'TEST_USER';
+  const userId = req.user?.id;
+  if (!req.user || req.user.role !== 'mentor' || !requireAssignedMentorProject(req, res, projectId)) return;
     
     // Clear lock in both potential tables
     const r1 = db.prepare(`UPDATE course_progress SET active_mentor_id = NULL, help_requested = 0 WHERE project_id = ? AND active_mentor_id = ?`).run(projectId, userId);
@@ -2054,7 +2098,7 @@ const adminOnly = (req, res, next) => {
 };
 
 // GET /admin/extensions
-router.get('/admin/extensions', wrap(async (req, res) => {
+router.get('/admin/extensions', adminOnly, wrap(async (req, res) => {
   const exts = db.prepare('SELECT * FROM platform_extensions ORDER BY created_at DESC').all();
   res.json(exts);
 }));
@@ -2129,16 +2173,58 @@ router.get('/admin/stats', adminOnly, wrap(async (req, res) => {
 
 // GET /admin/users
 router.get('/admin/users', adminOnly, wrap(async (req, res) => {
-  const users = db.prepare('SELECT id, email, name, role, skill_level, created_at FROM users ORDER BY created_at DESC LIMIT 100').all();
+  const users = db.prepare('SELECT id, email, name, role, roles, skill_level, created_at FROM users ORDER BY created_at DESC LIMIT 100').all()
+    .map(user => ({ ...user, roles: (() => { try { return JSON.parse(user.roles || '[]'); } catch { return []; } })() }));
   res.json(users);
 }));
 
-// PUT /admin/users/:id/role
+// PUT /admin/users/:id/role — grant a role; DELETE revokes it.
 router.put('/admin/users/:id/role', adminOnly, wrap(async (req, res) => {
   const { role } = req.body;
-  if (!['student', 'mentor', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, req.params.id);
+  const allowedRoles = ['student', 'citizen', 'mentor', 'university', 'admin'];
+  if (!allowedRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const user = db.prepare('SELECT id, email, role, roles FROM users WHERE id = ?').get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  let roles = [];
+  try { roles = Array.isArray(user.roles) ? user.roles : JSON.parse(user.roles || '[]'); } catch { roles = []; }
+  if (!Array.isArray(roles)) roles = [];
+  if (!roles.includes(user.role)) roles.push(user.role);
+  if (role === 'admin' && !require('../config').ADMIN_EMAILS.includes(user.email?.toLowerCase())) {
+    // Do not expose an admin grant to an account outside the platform allowlist.
+    return res.status(403).json({ error: 'This account is not authorized to receive the admin role.' });
+  }
+  if (!roles.includes(role)) roles.push(role);
+  db.prepare('UPDATE users SET role = ?, roles = ? WHERE id = ?').run(role, JSON.stringify(roles), req.params.id);
+  db.prepare(`INSERT INTO authorization_audit_log (id, actor_user_id, action, resource_type, resource_id, details)
+    VALUES (?, ?, 'admin.user_role_changed', 'user', ?, ?)`).run(
+    require('crypto').randomUUID(), req.user.id, req.params.id, JSON.stringify({ previousRole: user.role, role })
+  );
   res.json({ success: true });
+}));
+
+router.delete('/admin/users/:id/role/:role', adminOnly, wrap(async (req, res) => {
+  const role = String(req.params.role || '').toLowerCase();
+  const allowedRoles = ['student', 'citizen', 'mentor', 'university', 'admin'];
+  if (!allowedRoles.includes(role)) return res.status(400).json({ error: 'Invalid role.' });
+  const user = db.prepare('SELECT id, email, role, roles FROM users WHERE id = ?').get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  let roles = [];
+  try { roles = Array.isArray(user.roles) ? user.roles : JSON.parse(user.roles || '[]'); } catch { roles = []; }
+  if (!Array.isArray(roles)) roles = [];
+  if (!roles.includes(user.role)) roles.push(user.role);
+  if (!roles.includes(role)) return res.status(404).json({ error: 'Role is not granted to this user.' });
+  if (role === 'admin') {
+    const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get().count;
+    if (user.role === 'admin' && adminCount <= 1) return res.status(409).json({ error: 'The final active platform administrator cannot be demoted.' });
+  }
+  roles = roles.filter(item => item !== role);
+  const nextRole = user.role === role ? (roles[0] || 'student') : user.role;
+  db.prepare('UPDATE users SET role = ?, roles = ? WHERE id = ?').run(nextRole, JSON.stringify(roles), user.id);
+  db.prepare(`INSERT INTO authorization_audit_log (id, actor_user_id, action, resource_type, resource_id, details)
+    VALUES (?, ?, 'admin.user_role_revoked', 'user', ?, ?)`).run(
+    require('crypto').randomUUID(), req.user.id, user.id, JSON.stringify({ previousRole: user.role, revokedRole: role, nextRole })
+  );
+  res.json({ success: true, roles, role: nextRole });
 }));
 
 module.exports = router;

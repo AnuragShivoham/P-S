@@ -5,6 +5,43 @@
  * Integrated into SOCRATES SQLite persistence layer.
  */
 
+function ensureLabourColumns(db) {
+  const migrations = [
+    ['industry_signals', 'source_hash', 'TEXT'],
+    ['industry_signals', 'canonical_signal_id', 'TEXT'],
+    ['industry_signals', 'is_duplicate', 'INTEGER DEFAULT 0'],
+    ['industry_signals', 'is_demo_seed', 'INTEGER DEFAULT 0'],
+    ['industry_signals', 'source_provenance', 'TEXT DEFAULT "manual"'],
+    ['industry_signals', 'extraction_metadata', 'TEXT DEFAULT "{}"'],
+    ['source_feeds', 'status', 'TEXT DEFAULT "draft"'],
+    ['source_feeds', 'provider', 'TEXT DEFAULT "manual"'],
+    ['source_feeds', 'cron_expression', 'TEXT'],
+    ['source_feeds', 'polling_interval_minutes', 'INTEGER DEFAULT 1440'],
+    ['source_feeds', 'last_run_at', 'TEXT'],
+    ['source_feeds', 'last_status', 'TEXT DEFAULT "idle"'],
+    ['source_feeds', 'error_count', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'summary', 'TEXT'],
+    ['source_ingestion_runs', 'items_discovered', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'items_ingested', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'items_duplicated', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'items_failed', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'duration_ms', 'INTEGER DEFAULT 0'],
+    ['source_ingestion_runs', 'error_summary', 'TEXT'],
+    ['source_ingestion_runs', 'run_log', 'TEXT DEFAULT "[]"'],
+  ];
+
+  for (const [tableName, columnName, definition] of migrations) {
+    try {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    } catch (e) {
+      const text = e.message || '';
+      if (!/duplicate column name|already exists/i.test(text)) {
+        console.warn(`[LabourSchema] Migration warning for ${tableName}.${columnName}:`, text);
+      }
+    }
+  }
+}
+
 function initLabourSchema(db) {
   db.exec(`
     -- 1. Industry Signal Layer
@@ -20,8 +57,52 @@ function initLabourSchema(db) {
       collected_at TEXT DEFAULT (datetime('now')),
       raw_content TEXT NOT NULL,
       parsed_content TEXT, -- JSON summary with sections, detected skills, confidence
-      status TEXT DEFAULT 'pending', -- 'pending', 'processed', 'reviewed', 'archived'
+      status TEXT DEFAULT 'pending', -- 'pending', 'processed', 'reviewed', 'archived', 'duplicate'
+      source_hash TEXT,
+      canonical_signal_id TEXT REFERENCES industry_signals(id),
+      is_duplicate INTEGER DEFAULT 0,
+      is_demo_seed INTEGER DEFAULT 0,
+      source_provenance TEXT DEFAULT 'manual', -- 'manual', 'approved_feed', 'demo_seed', 'external_api'
+      extraction_metadata TEXT DEFAULT '{}',
       created_by TEXT REFERENCES users(id),
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS source_feeds (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'job_description',
+      url TEXT,
+      organization TEXT,
+      provider TEXT DEFAULT 'manual', -- 'manual', 'rss', 'api', 'sitemap', 'csv'
+      status TEXT DEFAULT 'draft', -- 'draft', 'active', 'paused', 'archived'
+      polling_interval_minutes INTEGER DEFAULT 1440,
+      last_run_at TEXT,
+      last_status TEXT DEFAULT 'idle',
+      error_count INTEGER DEFAULT 0,
+      approved_by TEXT REFERENCES users(id),
+      notes TEXT,
+      cron_expression TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS source_ingestion_runs (
+      id TEXT PRIMARY KEY,
+      feed_id TEXT REFERENCES source_feeds(id),
+      signal_id TEXT REFERENCES industry_signals(id),
+      source_url TEXT,
+      status TEXT DEFAULT 'queued', -- 'queued', 'running', 'success', 'duplicate', 'failed'
+      items_discovered INTEGER DEFAULT 0,
+      items_ingested INTEGER DEFAULT 0,
+      items_duplicated INTEGER DEFAULT 0,
+      items_failed INTEGER DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
+      error_summary TEXT,
+      run_log TEXT DEFAULT '[]',
+      run_started_at TEXT,
+      run_finished_at TEXT,
+      summary TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -221,7 +302,47 @@ function initLabourSchema(db) {
       status TEXT DEFAULT 'pending_review',
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- 15. Employer Job Postings / Requisitions
+    CREATE TABLE IF NOT EXISTS employer_job_postings (
+      id TEXT PRIMARY KEY,
+      employer_id TEXT NOT NULL REFERENCES users(id),
+      organization TEXT NOT NULL,
+      role_id TEXT NOT NULL REFERENCES roles_ontology(id),
+      title TEXT NOT NULL,
+      location TEXT DEFAULT 'Remote Eligible',
+      required_skills TEXT DEFAULT '[]', -- JSON array of canonical skill_ids
+      preferred_skills TEXT DEFAULT '[]', -- JSON array of canonical skill_ids
+      min_experience_years REAL DEFAULT 0,
+      status TEXT DEFAULT 'active', -- 'active', 'closed', 'draft'
+      signal_id TEXT REFERENCES industry_signals(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- 16. Student Evidence Sharing & Consent
+    CREATE TABLE IF NOT EXISTS student_evidence_shares (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL REFERENCES users(id),
+      grantee_type TEXT NOT NULL, -- 'institution', 'employer', 'public'
+      grantee_id TEXT, -- user_id or institution_id (NULL if public)
+      purpose TEXT DEFAULT 'placement_verification',
+      status TEXT DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+      expires_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Performance & Scoped Lookups Indexes
+    CREATE INDEX IF NOT EXISTS idx_signals_source_hash ON industry_signals(source_hash);
+    CREATE INDEX IF NOT EXISTS idx_signals_source_url ON industry_signals(source_url);
+    CREATE INDEX IF NOT EXISTS idx_requirements_role ON labour_requirements(role_id);
+    CREATE INDEX IF NOT EXISTS idx_requirements_skill ON labour_requirements(skill_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_learner ON competency_evidence_store(learner_id);
+    CREATE INDEX IF NOT EXISTS idx_ingestion_runs_feed ON source_ingestion_runs(feed_id);
+    CREATE INDEX IF NOT EXISTS idx_emp_jobs_emp ON employer_job_postings(employer_id);
   `);
+
+  ensureLabourColumns(db);
 
   // Seed baseline ontology if empty
   seedOntology(db);
@@ -382,8 +503,11 @@ Responsibilities & Core Engineering Expectations:
     });
 
     db.prepare(`
-      INSERT INTO industry_signals (id, source_type, source_name, organization, role_title, location, published_at, raw_content, parsed_content, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO industry_signals (
+        id, source_type, source_name, organization, role_title, location, published_at,
+        raw_content, parsed_content, status, source_hash, canonical_signal_id, is_duplicate,
+        is_demo_seed, source_provenance
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'sig_msft_200041085',
       'job_description',
@@ -394,7 +518,12 @@ Responsibilities & Core Engineering Expectations:
       '2026-09-18',
       rawContent,
       parsedJson,
-      'reviewed'
+      'reviewed',
+      'demo-msft-200041085',
+      null,
+      0,
+      1,
+      'demo_seed'
     );
 
     // Seed associated requirements in Requirement Matrix

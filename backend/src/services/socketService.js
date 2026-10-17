@@ -1,6 +1,8 @@
 const { WebSocket } = require('ws');
 const jwt = require('jsonwebtoken');
 const db = require('../db/database');
+const { requireProjectPermission, requireExplicitMentorAssignment } = require('../middleware/projectAccess');
+const config = require('../config');
 
 // Storage for active rooms
 // Key: projectId
@@ -103,7 +105,7 @@ const socketService = {
             }
 
             // 2. Auth & Role binding
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'socrates_secret_key');
+            const decoded = jwt.verify(token, config.JWT_SECRET);
             ws.userId = decoded.id;
             ws.projectId = projectId;
             ws.isAlive = true;
@@ -116,6 +118,13 @@ const socketService = {
                 return;
             }
             ws.role = user.role;
+            const readPermission = requireProjectPermission(user, projectId, false);
+            const assignedMentor = user.role === 'mentor' && requireExplicitMentorAssignment(user, projectId);
+            if (!readPermission.allowed && !assignedMentor) {
+                ws.close(4003, 'Project access denied');
+                return;
+            }
+            ws.projectAccessLevel = readPermission.level;
 
             // 3. Room Management
             if (!rooms.has(projectId)) {
@@ -164,6 +173,16 @@ const socketService = {
                     const message = JSON.parse(data);
                     const { type, msgId, payload } = message;
 
+                    const currentPermission = requireProjectPermission(user, projectId, true);
+                    if ((type === 'chat:send' || type === 'code:preview' || type === 'take_control') && !currentPermission.allowed) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Project write access required', msgId }));
+                        return;
+                    }
+                    if (type === 'code:preview' && ws.role !== 'mentor') {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Mentor assignment required', msgId }));
+                        return;
+                    }
+
                     if (!msgId) return;
 
                     // Idempotency: Room-scoped check (userId + projectId bound room)
@@ -202,12 +221,6 @@ const socketService = {
                             console.error('[WS] DB Save error:', e);
                         }
                     } else if (type === 'code:preview') {
-                        // Permission: Primary Only (and usually Mentor)
-                        if (ws.role !== 'mentor') {
-                            ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized action: Code Preview is restricted to Mentors.', msgId }));
-                            return;
-                        }
-
                         // Payload limits: 100KB soft, 500KB hard
                         if (JSON.stringify(payload).length > 500 * 1024) {
                             ws.send(JSON.stringify({ type: 'error', message: 'Payload too large', msgId }));

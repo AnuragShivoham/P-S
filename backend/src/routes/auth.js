@@ -1,15 +1,92 @@
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 const db = require('../db/database');
 const config = require('../config');
+const { sendEmail } = require('../services/emailService');
+const { getApprovedRegistration, completeRegistration } = require('../services/universityRegistration');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Auth Error]', e.message);
   res.status(500).json({ error: e.message });
 });
+
+const ALLOWED_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin', 'employer', 'institution', 'expert'];
+
+function normalizeRoles(value) {
+  let raw = Array.isArray(value) ? value : [];
+  if (!raw.length && typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      raw = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      raw = [];
+    }
+  }
+  const next = [];
+  for (const item of raw) {
+    const role = String(item || '').trim().toLowerCase();
+    if (ALLOWED_ROLES.includes(role) && !next.includes(role)) next.push(role);
+  }
+  return next;
+}
+
+function parseProfileData(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    return {};
+  }
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.pbkdf2Sync(String(password), salt, 100000, 64, 'sha256').toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || typeof storedHash !== 'string') return false;
+  const [salt, expectedHash] = String(storedHash).split(':');
+  if (!salt || !expectedHash) return false;
+  const candidate = crypto.pbkdf2Sync(String(password), salt, 100000, 64, 'sha256').toString('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expectedHash, 'hex'), Buffer.from(candidate, 'hex'));
+  } catch (error) {
+    return false;
+  }
+}
+
+const UNIVERSITY_ACCESS_ERROR = 'Unable to Access !! Contact ADMIN for PORTAL ACCESS';
+
+function getUniversityApplicationStatus(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  const row = db.prepare(`SELECT status FROM university_registration_requests WHERE email = ? ORDER BY created_at DESC LIMIT 1`).get(normalizedEmail);
+  return row ? row.status : null;
+}
+
+function hydrateUser(user) {
+  if (!user) return null;
+  try {
+    user.tech_stack = typeof user.tech_stack === 'string' ? JSON.parse(user.tech_stack || '[]') : (user.tech_stack || []);
+  } catch(e) { user.tech_stack = []; }
+  try {
+    user.primary_goals = typeof user.primary_goals === 'string' ? JSON.parse(user.primary_goals || '[]') : (user.primary_goals || []);
+  } catch(e) { user.primary_goals = []; }
+  user.roles = normalizeRoles(user.roles);
+  if (user.role && !user.roles.includes(String(user.role).toLowerCase())) user.roles.unshift(String(user.role).toLowerCase());
+  if (!user.roles.length) user.roles = ['student'];
+  if (user.role && !user.roles.includes(String(user.role).toLowerCase())) user.role = user.roles[0];
+  user.role = user.role && ALLOWED_ROLES.includes(String(user.role).toLowerCase()) ? String(user.role).toLowerCase() : user.roles[0] || 'student';
+  user.profile_data = parseProfileData(user.profile_data);
+  user.onboarded = user.onboarded === 1 || user.onboarded === true;
+  return user;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function signToken(user) {
@@ -23,93 +100,126 @@ function signToken(user) {
 function upsertUser(email, name, extra = {}) {
   const normalizedEmail = String(email).toLowerCase();
   let user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
-  
-  // Security Check: Only allow admin role if email is in whitelist
-  const ALLOWED_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
-  let targetRole = ALLOWED_ROLES.includes(extra.role) ? extra.role : 'student';
-  if (targetRole === 'admin') {
-    const isAdmin = config.ADMIN_EMAILS.includes(normalizedEmail);
-    if (!isAdmin) {
+
+  const requestedRole = extra.role ? String(extra.role).toLowerCase() : null;
+  const profileData = extra.profile_data ? parseProfileData(extra.profile_data) : {};
+
+  const safeRoles = normalizeRoles(user ? user.roles : []);
+  const incomingRoles = normalizeRoles(extra.roles || (requestedRole ? [requestedRole] : []));
+  let finalRoles = [...safeRoles, ...incomingRoles];
+
+  if (requestedRole && ALLOWED_ROLES.includes(requestedRole)) {
+    if (requestedRole === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
       console.warn(`[Auth Security] Unauthorized admin attempt by ${normalizedEmail}`);
-      targetRole = user ? user.role : 'student'; // Fallback to current role or student
+      return user || { id: null, email: normalizedEmail, name, role: 'student', roles: ['student'] };
     }
+    if (!finalRoles.includes(requestedRole)) finalRoles.push(requestedRole);
   }
+
+  if (!finalRoles.length) finalRoles = [config.ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : 'student'];
+
+  const nextRole = requestedRole && ALLOWED_ROLES.includes(requestedRole)
+    ? requestedRole
+    : (user && user.role && ALLOWED_ROLES.includes(String(user.role).toLowerCase()) ? String(user.role).toLowerCase() : finalRoles[0]);
 
   if (!user) {
     const id = uuidv4();
-    db.prepare('INSERT INTO users (id, email, name, role, google_id, avatar) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, normalizedEmail, name, targetRole, extra.google_id || null, extra.avatar || null);
+    db.prepare('INSERT INTO users (id, email, name, role, roles, profile_data, google_id, avatar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, normalizedEmail, name, nextRole, JSON.stringify(finalRoles), JSON.stringify(profileData), extra.google_id || null, extra.avatar || null);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   } else {
-    // Always update role if explicitly provided at login (supports role switching)
     const updates = [];
     const params = [];
-    const ALLOWED_SWITCHABLE_ROLES = ['student', 'mentor', 'citizen', 'university', 'admin'];
-    if (extra.role && ALLOWED_SWITCHABLE_ROLES.includes(extra.role)) {
-      // Check permission for switching to admin
-      if (extra.role === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
+
+    if (requestedRole && ALLOWED_ROLES.includes(requestedRole)) {
+      if (requestedRole === 'admin' && !config.ADMIN_EMAILS.includes(normalizedEmail)) {
         console.warn(`[Auth Security] User ${normalizedEmail} blocked from switching to ADMIN`);
       } else {
-        updates.push('role=?');
-        params.push(extra.role);
+        updates.push('role=?', 'roles=?');
+        params.push(nextRole, JSON.stringify(finalRoles));
       }
+    } else if (!user.role || !ALLOWED_ROLES.includes(String(user.role).toLowerCase())) {
+      updates.push('role=?', 'roles=?');
+      params.push(nextRole, JSON.stringify(finalRoles));
     }
+
+    if (Object.keys(profileData).length > 0) {
+      const merged = { ...parseProfileData(user.profile_data), ...profileData };
+      updates.push('profile_data=?');
+      params.push(JSON.stringify(merged));
+    }
+
     if (extra.google_id && !user.google_id) {
       updates.push('google_id=?', 'avatar=?');
       params.push(extra.google_id, extra.avatar || null);
     }
+
+    if (extra.avatar && !user.avatar) {
+      updates.push('avatar=?');
+      params.push(extra.avatar);
+    }
+
     if (updates.length > 0) {
       params.push(user.id);
       db.prepare(`UPDATE users SET ${updates.join(',')} WHERE id=?`).run(...params);
     }
+
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   }
-  return user;
+
+  return hydrateUser(user);
 }
 
-// ─── Email transporter  ───────────────────────────────────────────────────────
-function getTransporter() {
-  if (!config.EMAIL_USER || !config.EMAIL_PASS) {
-    console.warn('[Auth] EMAIL_USER / EMAIL_PASS not set – OTP emails will fail');
-  }
-  return nodemailer.createTransport({
-    host: config.EMAIL_HOST,
-    port: config.EMAIL_PORT,
-    secure: config.EMAIL_PORT === 465,
-    auth: { user: config.EMAIL_USER, pass: config.EMAIL_PASS },
-  });
+function hasGrantedRole(user, role) {
+  if (!role || role === 'student' || role === 'citizen' || role === 'employer') return true;
+  if (role === 'admin') return false;
+  return normalizeRoles([...(normalizeRoles(user?.roles)), user?.role]).includes(role);
 }
 
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
 router.post('/send-otp', wrap(async (req, res) => {
-  const { email, action } = req.body;
+  const { email, action, registration_token } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Valid email required' });
   }
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const universityStatus = getUniversityApplicationStatus(normalizedEmail);
+  if (action === 'login' && (universityStatus === 'pending' || universityStatus === 'rejected')) {
+    return res.status(403).json({ error: UNIVERSITY_ACCESS_ERROR });
+  }
 
-  const normalizedEmail = email.toLowerCase();
+  const requestedRole = String(req.body.profile?.role || req.body.role || '').toLowerCase();
+  const universityRegistration = requestedRole === 'university' && action === 'signup'
+    ? getApprovedRegistration(registration_token, email)
+    : null;
+  if (requestedRole === 'university' && action === 'signup' && !universityRegistration) {
+    return res.status(403).json({ error: 'University sign-up requires approval from a platform administrator and a valid email verification link.' });
+  }
+  if (requestedRole === 'mentor' || requestedRole === 'university') {
+    const account = db.prepare('SELECT role, roles FROM users WHERE email = ?').get(normalizedEmail);
+    if (!hasGrantedRole(account, requestedRole) && !universityRegistration) {
+      return res.status(403).json({ error: 'Mentor and university access must be granted by a platform administrator.' });
+    }
+  }
+
   const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
 
   if (action === 'login' && !userExists) {
     return res.status(404).json({ error: 'Account not found. Please sign up first.' });
-  }
-  if (action === 'signup' && userExists) {
-    return res.status(409).json({ error: 'Account already exists. Please log in.' });
   }
 
   let otp = String(Math.floor(100000 + Math.random() * 900000));
   if (normalizedEmail === 'test@example.com') {
     otp = '123456';
   }
-  
+
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
 
   db.prepare('INSERT INTO otp_requests (id, email, otp, expires_at) VALUES (?, ?, ?, ?)')
     .run(uuidv4(), email.toLowerCase(), otp, expiresAt);
 
   try {
-    const transporter = getTransporter();
-    await transporter.sendMail({
+    await sendEmail({
       from: config.EMAIL_FROM,
       to: email,
       subject: 'Your SOCRATES login code',
@@ -122,41 +232,49 @@ router.post('/send-otp', wrap(async (req, res) => {
         </div>
       `,
     });
-    res.json({ success: true, message: 'OTP sent to ' + email });
+    return res.json({ success: true, message: 'OTP sent to ' + email });
   } catch (e) {
     console.error('[Auth] Email send failed:', e.message);
-    // In dev mode, log the OTP so the developer can see it
-    console.log(`\n[DEV ONLY] OTP for ${email}: ${otp}\n`);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      return res.json({ success: true, message: 'OTP generated (Check server console in dev mode)' });
-    }
-    res.status(500).json({ error: 'Failed to send email: ' + e.message });
+    console.log(`\n[OTP FALLBACK] OTP for ${email}: ${otp}\n`);
+    return res.json({
+      success: true,
+      message: 'OTP generated. Email delivery failed in this environment, but the login flow remains available for testing. Check the server console for the OTP.',
+      fallback: true,
+    });
   }
 }));
 
-function hydrateUser(user) {
-  if (!user) return null;
-  try {
-    user.tech_stack = typeof user.tech_stack === 'string' ? JSON.parse(user.tech_stack || '[]') : (user.tech_stack || []);
-  } catch(e) { user.tech_stack = []; }
-  try {
-    user.primary_goals = typeof user.primary_goals === 'string' ? JSON.parse(user.primary_goals || '[]') : (user.primary_goals || []);
-  } catch(e) { user.primary_goals = []; }
-  user.onboarded = user.onboarded === 1 || user.onboarded === true;
-  return user;
-}
-
 // ─── POST /auth/verify-otp ────────────────────────────────────────────────────
 router.post('/verify-otp', wrap(async (req, res) => {
-  const { email, otp, name, role, action } = req.body;
+  const { email, otp, name, role, action, profile_data, profile, registration_token } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'email and otp required' });
-  const ALLOWED_OTP_ROLES = ['student', 'mentor', 'citizen', 'university'];
+  const ALLOWED_OTP_ROLES = ['student', 'mentor', 'citizen', 'university', 'employer', 'institution', 'expert'];
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
   }
   if (role && !ALLOWED_OTP_ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role specified.' });
+  }
+
+  const universityRegistration = role === 'university' && action === 'signup'
+    ? getApprovedRegistration(registration_token, email)
+    : null;
+  if (role === 'university' && action === 'signup' && !universityRegistration) {
+    return res.status(403).json({ error: 'University sign-up requires approval from a platform administrator and a valid email verification link.' });
+  }
+  if (role === 'university' && action === 'login') {
+    const status = getUniversityApplicationStatus(email);
+    if (status === 'pending' || status === 'rejected') {
+      return res.status(403).json({ error: UNIVERSITY_ACCESS_ERROR });
+    }
+    if (!hasGrantedRole(db.prepare('SELECT role, roles FROM users WHERE email = ?').get(email.toLowerCase()), role)) {
+      return res.status(403).json({ error: 'University access is not enabled for this account.' });
+    }
+  }
+
+  const account = db.prepare('SELECT id, role, roles FROM users WHERE email = ?').get(email.toLowerCase());
+  if (!hasGrantedRole(account, role) && !universityRegistration) {
+    return res.status(403).json({ error: 'Mentor and university access must be granted by a platform administrator.' });
   }
 
   const now = new Date().toISOString();
@@ -166,28 +284,36 @@ router.post('/verify-otp', wrap(async (req, res) => {
 
   if (!record) return res.status(401).json({ error: 'Invalid or expired OTP' });
 
-  // Mark used
-  db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
-
   const normalizedEmail = email.toLowerCase();
   const userExists = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
 
   if (action === 'login' && !userExists) {
     return res.status(404).json({ error: 'Account not found. Please sign up first.' });
   }
-  if (action === 'signup' && userExists) {
-    return res.status(409).json({ error: 'Account already exists. Please log in.' });
-  }
 
-  const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { role });
+  const effectiveName = universityRegistration?.contact_name || name || email.split('@')[0];
+  const effectiveProfile = universityRegistration
+    ? { ...(profile_data || profile || {}), institution_name: universityRegistration.institution_name }
+    : (profile_data || profile || {});
+  db.exec('BEGIN IMMEDIATE');
+  try {
+  db.prepare('UPDATE otp_requests SET used=1 WHERE id=?').run(record.id);
+  const rawUser = upsertUser(normalizedEmail, effectiveName, { role, profile_data: effectiveProfile });
   
   if (role === 'admin' && rawUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access Denied: Your email is not authorized for Admin access.' });
   }
 
   const user = hydrateUser(rawUser);
+  if (universityRegistration) completeRegistration(registration_token, normalizedEmail, user.id);
   const token = signToken(user);
+  db.exec('COMMIT');
   res.json({ token, user });
+  } catch (error) {
+    db.exec('ROLLBACK');
+    if (error.code === 'REGISTRATION_LINK_USED') return res.status(409).json({ error: error.message });
+    throw error;
+  }
 }));
 
 // ─── POST /auth/admin-login ──────────────────────────────────────────────────
@@ -210,10 +336,64 @@ router.post('/admin-login', wrap(async (req, res) => {
   res.json({ token, user });
 }));
 
+router.post('/login-password', wrap(async (req, res) => {
+  const { email, password } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  if (!normalizedEmail || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  const status = getUniversityApplicationStatus(normalizedEmail);
+  if (status === 'pending' || status === 'rejected') {
+    return res.status(403).json({ error: UNIVERSITY_ACCESS_ERROR });
+  }
+
+  if (!user.password_hash || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  const hydrated = hydrateUser(user);
+  const token = signToken(hydrated);
+  res.json({ token, user: hydrated });
+}));
+
+router.post('/set-password', wrap(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authorization required' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  let payload;
+  try {
+    payload = jwt.verify(token, config.JWT_SECRET);
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  const { password } = req.body;
+  if (!password || String(password).length < 8 || String(password).length > 128) {
+    return res.status(400).json({ error: 'Password must be between 8 and 128 characters.' });
+  }
+
+  const checkUser = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+  if (!checkUser) return res.status(404).json({ error: 'User not found' });
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), payload.id);
+  const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id));
+  res.json({ success: true, user, message: 'Password set successfully. You can now sign in with your email and password.' });
+}));
+
 // ─── POST /auth/google ────────────────────────────────────────────────────────
 // Accepts a Google `credential` (ID token from Google Identity Services)
 router.post('/google', wrap(async (req, res) => {
-  const { credential, role } = req.body;
+  const { credential, role, profile, profile_data, registration_token } = req.body;
   if (!credential) return res.status(400).json({ error: 'credential required' });
   if (role === 'admin') {
     return res.status(403).json({ error: 'Admin access requires the admin email and password.' });
@@ -272,27 +452,54 @@ router.post('/google', wrap(async (req, res) => {
   if (!email) {
     return res.status(401).json({ error: 'Google account missing email address.' });
   }
+  if (role === 'university' && payload.email_verified !== true && payload.email_verified !== 'true') {
+    return res.status(403).json({ error: 'University Google sign-in requires a Google account with a verified email address.' });
+  }
 
   console.log(`[Google Auth Success] User: ${email}`);
 
   // Consistently lowercase email to prevent SQLite UNIQUE collisions across case-sensitivity boundaries
   const normalizedEmail = email.toLowerCase();
-  
-  // Check if user exists for Google login (only allow login, not signup)
-  let userRecord = db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail);
-  if (!userRecord) {
-    return res.status(401).json({ error: 'Account not found. Please sign up first.' });
+  if (role === 'university') {
+    const status = getUniversityApplicationStatus(normalizedEmail);
+    if (status === 'pending' || status === 'rejected') {
+      return res.status(403).json({ error: UNIVERSITY_ACCESS_ERROR });
+    }
+  }
+  const account = db.prepare('SELECT id, role, roles FROM users WHERE email = ?').get(normalizedEmail);
+  const universityRegistration = role === 'university'
+    ? getApprovedRegistration(registration_token, normalizedEmail)
+    : null;
+  if (role === 'university' && !hasGrantedRole(account, role) && !universityRegistration) {
+    return res.status(403).json({ error: 'University sign-up requires administrator approval and the email verification link.' });
+  }
+  if (account && !hasGrantedRole(account, role) && !universityRegistration) {
+    return res.status(403).json({ error: 'Mentor and university access must be granted by a platform administrator.' });
   }
 
-  const rawUser = upsertUser(normalizedEmail, name || email.split('@')[0], { google_id, avatar, role });
-  
+  // Allow Google login to both sign in existing users and sign up first-time users.
+  // This supports the "Sign in with Google" button on both the login and signup flows.
+  const googleProfile = universityRegistration
+    ? { ...(profile_data || profile || {}), institution_name: universityRegistration.institution_name }
+    : (profile_data || profile || {});
+  db.exec('BEGIN IMMEDIATE');
+  try {
+  const rawUser = upsertUser(normalizedEmail, universityRegistration?.contact_name || name || email.split('@')[0], { google_id, avatar, role, profile_data: googleProfile });
+
   if (role === 'admin' && rawUser.role !== 'admin') {
     return res.status(403).json({ error: 'Access Denied: Your email is not authorized for Admin access.' });
   }
 
   const user = hydrateUser(rawUser);
+  if (universityRegistration) completeRegistration(registration_token, normalizedEmail, user.id);
   const token = signToken(user);
+  db.exec('COMMIT');
   res.json({ token, user });
+  } catch (error) {
+    db.exec('ROLLBACK');
+    if (error.code === 'REGISTRATION_LINK_USED') return res.status(409).json({ error: error.message });
+    throw error;
+  }
 }));
 
 // ─── PUT /auth/role ───────────────────────────────────────────────────────────
@@ -305,15 +512,16 @@ router.put('/role', wrap(async (req, res) => {
   try { payload = jwt.verify(token, config.JWT_SECRET); }
   catch (e) { return res.status(401).json({ error: 'Invalid token' }); }
 
-  const { role } = req.body;
-  if (!['student', 'mentor', 'admin'].includes(role)) return res.status(400).json({ error: 'role must be student, mentor, or admin' });
+  const role = String(req.body.role || '').toLowerCase();
+  if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role specified.' });
 
-  // Security Check for switching to admin
-  if (role === 'admin' && !config.ADMIN_EMAILS.includes(String(payload.email).toLowerCase())) {
-    return res.status(403).json({ error: 'Unauthorized: Your email is not whitelisted for Admin role' });
+  const currentUser = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
+  if (!currentUser) return res.status(401).json({ error: 'User not found' });
+  const roles = normalizeRoles([...(normalizeRoles(currentUser.roles)), currentUser.role]);
+  if (!roles.includes(role)) {
+    return res.status(403).json({ error: 'You may only switch to a role already granted to your account by an administrator.' });
   }
-
-  db.prepare('UPDATE users SET role=? WHERE id=?').run(role, payload.id);
+  db.prepare('UPDATE users SET role=?, roles=? WHERE id=?').run(role, JSON.stringify(roles), payload.id);
   const user = hydrateUser(db.prepare('SELECT * FROM users WHERE id=?').get(payload.id));
   const newToken = signToken(user);
   res.json({ token: newToken, user });

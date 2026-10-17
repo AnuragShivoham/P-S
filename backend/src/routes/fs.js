@@ -3,6 +3,7 @@ const router = express.Router();
 const WorkspaceService = require('../services/workspaceService');
 const db = require('../db/database');
 const fs = require('fs');
+const { requireProjectPermission } = require('../middleware/projectAccess');
 
 const authorizedDeletions = new Map();
 
@@ -11,6 +12,7 @@ router.post('/authorize-deletion', (req, res) => {
     if (!req.user || !req.user.id) throw new Error("Authentication required");
     const { projectId, path: targetPath } = req.body;
     if (!projectId || targetPath === undefined) throw new Error("projectId and path required");
+    if (!requireProjectPermission(req.user, projectId, true).allowed) throw new Error('Write access to this project is required');
 
     const normTarget = targetPath.replace(/^[\/\\]+/, '');
     const expiry = Date.now() + 120000;
@@ -25,13 +27,13 @@ router.post('/authorize-deletion', (req, res) => {
   }
 });
 
-function getUserProject(req, projectId) {
+function getUserProject(req, projectId, write = false) {
   if (projectId) {
-    const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    const permission = requireProjectPermission(req.user, projectId, write);
+    if (!permission.allowed) {
       throw new Error('Access denied');
     }
-    return project;
+    return permission.project;
   }
 
   // Fall back to the most recent project for the user
@@ -135,7 +137,7 @@ router.post('/file/:projectId/*', (req, res) => {
       return res.status(400).json({ error: 'content must be a string' });
     }
 
-    const project = getUserProject(req, projectId);
+    const project = getUserProject(req, projectId, true);
 
     const result = WorkspaceService.writeFile(projectId, filePath, content);
     res.json(result);
@@ -153,7 +155,7 @@ router.delete('/file/:projectId/*', (req, res) => {
     const { projectId } = req.params;
     const filePath = req.params[0];
 
-    const project = getUserProject(req, projectId);
+    const project = getUserProject(req, projectId, true);
 
     const normReqPath = filePath.replace(/^[\/\\]+/, '');
     let isAuthorized = false;
@@ -189,7 +191,7 @@ router.post('/folder/:projectId/*', (req, res) => {
     const { projectId } = req.params;
     const dirPath = req.params[0];
 
-    const project = getUserProject(req, projectId);
+    const project = getUserProject(req, projectId, true);
 
     const result = WorkspaceService.createDirectory(projectId, dirPath);
     res.json(result);
@@ -207,20 +209,6 @@ router.get('/tree', (req, res) => {
   try {
     const project = getUserProject(req, req.query.projectId);
     const dir = req.query.dir || '';
-    const workspacePath = WorkspaceService.getProjectPath(project.id);
-    if (!fs.existsSync(workspacePath) || fs.readdirSync(workspacePath).length === 0) {
-      const fullProject = db.prepare('SELECT project_type, tech_stack FROM projects WHERE id = ?').get(project.id);
-      const stack = (() => {
-        try { return JSON.parse(fullProject?.tech_stack || '[]'); } catch { return []; }
-      })();
-      const template = fullProject?.project_type === 'hardware'
-        ? 'nodejs'
-        : (fullProject?.project_type === 'ai' || stack.some(item => /python|fastapi|django|flask/i.test(item))
-          ? 'python'
-          : (['web', 'mobile', 'desktop', 'fullstack'].includes(fullProject?.project_type) ? 'react' : 'nodejs'));
-      WorkspaceService.createProjectWorkspace(project.id);
-      WorkspaceService.initializeProjectStructure(project.id, template);
-    }
     const files = WorkspaceService.listFiles(project.id, dir);
     res.json({ projectId: project.id, directory: dir || '/', tree: files });
   } catch (err) {
@@ -245,7 +233,7 @@ router.get('/file', (req, res) => {
 
 router.post('/file', (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { path: filePath, content } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
     if (typeof content !== 'string') return res.status(400).json({ error: 'content must be a string' });
@@ -260,7 +248,7 @@ router.post('/file', (req, res) => {
 
 router.post('/touch', (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { path: filePath } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
 
@@ -274,7 +262,7 @@ router.post('/touch', (req, res) => {
 
 router.post('/mkdir', (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { path: dirPath } = req.body;
     if (!dirPath) return res.status(400).json({ error: 'path required' });
 
@@ -288,7 +276,7 @@ router.post('/mkdir', (req, res) => {
 
 router.put('/rename', (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { oldPath, newPath } = req.body;
     if (!oldPath || !newPath) return res.status(400).json({ error: 'oldPath and newPath required' });
 
@@ -302,7 +290,7 @@ router.put('/rename', (req, res) => {
 
 router.delete('/file', (req, res) => {
   try {
-    const project = getUserProject(req, req.query.projectId);
+    const project = getUserProject(req, req.query.projectId, true);
     const filePath = req.query.path;
     if (!filePath) return res.status(400).json({ error: 'path required' });
 
@@ -333,7 +321,7 @@ router.delete('/file', (req, res) => {
 
 router.post('/upload', (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { path: filePath, content, encoding } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
     
@@ -357,7 +345,7 @@ router.post('/upload', (req, res) => {
 
 router.post('/git-clone', async (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { url, targetDir = '' } = req.body;
     if (!url) return res.status(400).json({ error: 'url required' });
 
@@ -392,7 +380,7 @@ router.post('/git-clone', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/git-push', async (req, res) => {
   try {
-    const project = getUserProject(req, req.body.projectId);
+    const project = getUserProject(req, req.body.projectId, true);
     const { message = 'SOCRATES: auto-save checkpoint' } = req.body;
     
     const workspacePath = WorkspaceService.getProjectPath(project.id);
@@ -451,8 +439,8 @@ router.post('/init/:projectId', (req, res) => {
     const { template = 'nodejs' } = req.body;
 
     // Verify project belongs to user
-    const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    const permission = requireProjectPermission(req.user, projectId, true);
+    if (!permission.allowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -472,8 +460,8 @@ router.get('/stats/:projectId', (req, res) => {
     const { projectId } = req.params;
 
     // Verify project belongs to user
-    const project = db.prepare('SELECT id, user_id FROM projects WHERE id = ?').get(projectId);
-    if (!project || project.user_id !== req.user.id) {
+    const permission = requireProjectPermission(req.user, projectId);
+    if (!permission.allowed) {
       return res.status(403).json({ error: 'Access denied' });
     }
 

@@ -28,8 +28,11 @@ db.exec(`
     name TEXT NOT NULL,
     skill_level TEXT DEFAULT 'beginner',
     role TEXT DEFAULT 'student',
+    roles TEXT DEFAULT '[]',
+    profile_data TEXT DEFAULT '{}',
     google_id TEXT,
     avatar TEXT,
+    password_hash TEXT,
     tech_stack TEXT DEFAULT '[]',
     created_at TEXT DEFAULT (datetime('now'))
   );
@@ -40,6 +43,21 @@ db.exec(`
     otp TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     used INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS university_registration_requests (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    contact_name TEXT NOT NULL,
+    institution_name TEXT NOT NULL,
+    website TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'registered')),
+    token_hash TEXT UNIQUE,
+    expires_at TEXT,
+    reviewed_by TEXT REFERENCES users(id),
+    reviewed_at TEXT,
+    registered_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -119,6 +137,24 @@ db.exec(`
     content TEXT NOT NULL,
     context_type TEXT,
     created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS project_teams (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT DEFAULT 'Solution Team',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS project_team_members (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES project_teams(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT DEFAULT 'developer',
+    assigned_task_id TEXT REFERENCES tasks(id),
+    status TEXT DEFAULT 'active',
+    access_level TEXT NOT NULL DEFAULT 'read',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS workspace_files (
@@ -338,6 +374,10 @@ if (!cols.includes('avatar')) {
   db.exec("ALTER TABLE users ADD COLUMN avatar TEXT");
   console.log('[DB] Migrated: added avatar to users');
 }
+if (!cols.includes('password_hash')) {
+  db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
+  console.log('[DB] Migrated: added password_hash to users');
+}
 if (!cols.includes('active_project_id')) {
   db.exec("ALTER TABLE users ADD COLUMN active_project_id TEXT");
   console.log('[DB] Migrated: added active_project_id to users');
@@ -347,6 +387,14 @@ if (!cols.includes('tech_stack')) {
   console.log('[DB] Migrated: added tech_stack to users');
 }
 // ─── Onboarding metadata migrations ──────────────────────────────────────────
+if (!cols.includes('roles')) {
+  db.exec("ALTER TABLE users ADD COLUMN roles TEXT DEFAULT '[]'");
+  console.log('[DB] Migrated: added roles to users');
+}
+if (!cols.includes('profile_data')) {
+  db.exec("ALTER TABLE users ADD COLUMN profile_data TEXT DEFAULT '{}'");
+  console.log('[DB] Migrated: added profile_data to users');
+}
 if (!cols.includes('onboarded')) {
   db.exec("ALTER TABLE users ADD COLUMN onboarded INTEGER DEFAULT 0");
   console.log('[DB] Migrated: added onboarded to users');
@@ -660,6 +708,7 @@ db.exec(`
     role TEXT DEFAULT 'developer',
     assigned_task_id TEXT REFERENCES tasks(id),
     status TEXT DEFAULT 'active',
+    access_level TEXT NOT NULL DEFAULT 'read',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -817,7 +866,75 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     reviewed_at DATETIME
   );
+
+  CREATE TABLE IF NOT EXISTS institutions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS institution_memberships (
+    id TEXT PRIMARY KEY,
+    institution_id TEXT NOT NULL REFERENCES institutions(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    is_institution_admin INTEGER NOT NULL DEFAULT 0,
+    department_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(institution_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS institution_departments (
+    id TEXT PRIMARY KEY,
+    institution_id TEXT NOT NULL REFERENCES institutions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    program TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(institution_id, name)
+  );
+
+  CREATE TABLE IF NOT EXISTS authorization_audit_log (
+    id TEXT PRIMARY KEY,
+    actor_user_id TEXT REFERENCES users(id),
+    action TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT,
+    details TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS project_access_grants (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_level TEXT NOT NULL CHECK(access_level IN ('read', 'write')),
+    granted_by TEXT NOT NULL REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, user_id)
+  );
 `);
+
+const teamMemberColumns = db.prepare('PRAGMA table_info(project_team_members)').all().map(c => c.name);
+if (!teamMemberColumns.includes('access_level')) {
+  db.exec("ALTER TABLE project_team_members ADD COLUMN access_level TEXT NOT NULL DEFAULT 'read'");
+}
+
+const institutionMembershipColumns = db.prepare('PRAGMA table_info(institution_memberships)').all().map(c => c.name);
+if (!institutionMembershipColumns.includes('is_institution_admin')) {
+  db.exec('ALTER TABLE institution_memberships ADD COLUMN is_institution_admin INTEGER NOT NULL DEFAULT 0');
+}
+
+const projectGrantColumns = db.prepare('PRAGMA table_info(project_access_grants)').all().map(c => c.name);
+if (!projectGrantColumns.includes('access_level')) {
+  db.exec("ALTER TABLE project_access_grants ADD COLUMN access_level TEXT NOT NULL DEFAULT 'read'");
+}
 
 // ─── Column migrations for new tables (idempotent) ───────────────────────────
 const adoptionInfo = db.prepare('PRAGMA table_info(problem_adoptions)').all().map(c => c.name);

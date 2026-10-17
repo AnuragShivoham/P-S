@@ -461,7 +461,14 @@ export default function DashboardPage() {
             {project.title || project.raw_goal}
           </h1>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 14 }}>
+            <button 
+              className="btn btn-s" 
+              onClick={() => navigate('/labour-intelligence')}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, border: '1px solid var(--border)' }}
+            >
+              📊 Labour Intelligence →
+            </button>
             <button className="btn btn-p" onClick={() => navigate('/ide')}>
               <Code2 size={15} /> Open Project IDE
             </button>

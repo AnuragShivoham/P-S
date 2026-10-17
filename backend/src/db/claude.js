@@ -159,4 +159,91 @@ async function callClaudeJSON(system, userMsg, history = [], maxTokens = 2000) {
   }
 }
 
-module.exports = { callClaude, callClaudeJSON };
+/**
+ * Checks connectivity and authentication status of configured LLM provider.
+ * Never exposes API keys or internal secrets in diagnostic output.
+ */
+async function checkProviderHealth() {
+  const isLocal = config.LLM_PROVIDER === 'local';
+  const provider = isLocal ? 'ollama' : 'groq';
+  const model = isLocal ? config.LOCAL_MODEL : config.GROQ_MODEL;
+
+  if (!isLocal && (!config.GROQ_API_KEY || config.GROQ_API_KEY.trim() === '')) {
+    return {
+      status: 'unconfigured',
+      provider,
+      model,
+      connected: false,
+      authenticated: false,
+      fallback_active: true,
+      message: 'GROQ_API_KEY is missing in backend environment. Deterministic rules fallback is active.'
+    };
+  }
+
+  const url = isLocal 
+    ? `${config.OLLAMA_BASE_URL}/v1/chat/completions` 
+    : 'https://api.groq.com/openai/v1/chat/completions';
+    
+  const headers = { 'Content-Type': 'application/json' };
+  if (!isLocal) headers['Authorization'] = `Bearer ${config.GROQ_API_KEY}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000); // 5s bounded probe
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'health_check' }],
+        max_tokens: 1
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      return {
+        status: 'healthy',
+        provider,
+        model,
+        connected: true,
+        authenticated: true,
+        fallback_active: false,
+        message: 'LLM inference provider is active and operational.'
+      };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const isAuthErr = res.status === 401 || data?.error?.code === 'invalid_api_key' || data?.error?.code === 'expired_api_key';
+
+    return {
+      status: 'degraded',
+      provider,
+      model,
+      connected: true,
+      authenticated: !isAuthErr,
+      fallback_active: true,
+      message: isAuthErr 
+        ? 'The backend AI provider key is invalid or expired. Set a valid GROQ_API_KEY.' 
+        : `Provider returned HTTP ${res.status}: ${data?.error?.message || 'Inference degraded.'}`
+    };
+  } catch (err) {
+    clearTimeout(timeout);
+    return {
+      status: 'degraded',
+      provider,
+      model,
+      connected: false,
+      authenticated: false,
+      fallback_active: true,
+      message: err.name === 'AbortError' 
+        ? 'Provider health probe timed out after 5s. Deterministic fallback active.' 
+        : `Connection failed: ${err.message}`
+    };
+  }
+}
+
+module.exports = { callClaude, callClaudeJSON, checkProviderHealth };

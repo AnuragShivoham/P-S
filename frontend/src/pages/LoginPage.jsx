@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { GoogleLogin, useGoogleLogin } from '@react-oauth/google';
-import { Mail, Shield, ShieldAlert, User, GraduationCap, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
+import { Shield, ShieldAlert, User, ArrowRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useStore } from '../store';
+import { getDashboardPathForRole, getPrimaryRole } from '../utils/roleUtils';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { setAuth, token } = useStore();
+  const [searchParams] = useSearchParams();
+  const { setAuth, token, roles } = useStore();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState('student');
+  const [role, setRole] = useState(searchParams.get('role') === 'university' ? 'university' : 'student');
   const [step, setStep] = useState('login'); // login, otp, role
   
   const [loading, setLoading] = useState(false);
@@ -25,6 +27,14 @@ export default function LoginPage() {
     if (token) navigate('/');
   }, [token, navigate]);
 
+  const sanitizeAuthError = (message) => {
+    const text = String(message || '');
+    if (role === 'university' && /email delivery failed|failed to send email|portal access|contact admin/i.test(text)) {
+      return 'Unable to Access !! Contact ADMIN for PORTAL ACCESS';
+    }
+    return text;
+  };
+
   const handleSendOtp = async () => {
     if (!email) return setError('Email is required');
     setLoading(true);
@@ -34,7 +44,7 @@ export default function LoginPage() {
       setMsg(res.message);
       setStep('otp');
     } catch (e) {
-      setError(e.message);
+      setError(sanitizeAuthError(e.message));
     }
     setLoading(false);
   };
@@ -46,16 +56,11 @@ export default function LoginPage() {
     try {
       const res = await api.verifyOtp(email, otp, name, role, 'login');
       setAuth(res.user, res.token);
-      if (res.user.role === 'citizen') {
-        navigate('/citizen-dashboard');
-      } else if (res.user.role === 'mentor' || res.user.role === 'university') {
-        navigate('/mentor');
-      } else if (res.user.role === 'admin') {
-        navigate('/admin');
-      } else if (!res.user.onboarded) {
+      const activeRole = getPrimaryRole(res.user);
+      if (!res.user.onboarded && activeRole !== 'admin' && activeRole !== 'mentor' && activeRole !== 'university') {
         navigate('/onboarding');
       } else {
-        navigate('/projects');
+        navigate(getDashboardPathForRole(activeRole));
       }
     } catch (e) {
       setError(e.message);
@@ -69,19 +74,14 @@ export default function LoginPage() {
     try {
       const res = await api.loginGoogle(response.credential, role);
       setAuth(res.user, res.token);
-      if (res.user.role === 'citizen') {
-        navigate('/citizen-dashboard');
-      } else if (res.user.role === 'mentor' || res.user.role === 'university') {
-        navigate('/mentor');
-      } else if (res.user.role === 'admin') {
-        navigate('/admin');
-      } else if (!res.user.onboarded) {
+      const activeRole = getPrimaryRole(res.user);
+      if (!res.user.onboarded && activeRole !== 'admin' && activeRole !== 'mentor' && activeRole !== 'university') {
         navigate('/onboarding');
       } else {
-        navigate('/projects');
+        navigate(getDashboardPathForRole(activeRole));
       }
     } catch (e) {
-      setError(e.message);
+      setError(sanitizeAuthError(e.message));
     }
     setLoading(false);
   };
@@ -93,7 +93,7 @@ export default function LoginPage() {
     try {
       const res = await api.loginAdmin(email, password);
       setAuth(res.user, res.token);
-      navigate('/admin');
+      navigate(getDashboardPathForRole(getPrimaryRole(res.user)));
     } catch (e) {
       setError(e.message);
     }
@@ -130,7 +130,7 @@ export default function LoginPage() {
         {step === 'login' && (
           <div className="slide-down">
             <div style={{ marginBottom: 16 }}>
-              <label className="lbl">Role Selection — choose Admin only for an admin account</label>
+              <label className="lbl">Choose an approved account role</label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                 <button
                   onClick={() => setRole('student')}
@@ -146,20 +146,16 @@ export default function LoginPage() {
                 >
                   🌍 Citizen
                 </button>
-                <button
+                {roles?.includes('mentor') && <button
                   onClick={() => setRole('mentor')}
                   className={`btn ${role === 'mentor' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  <Shield size={13} /> Mentor
-                </button>
+                ><Shield size={13} /> Mentor</button>}
                 <button
                   onClick={() => setRole('university')}
                   className={`btn ${role === 'university' ? 'btn-p' : 'btn-g'}`}
                   style={{ justifyContent: 'center', fontSize: 10 }}
-                >
-                  🎓 University
-                </button>
+                >🎓 University</button>
                 <button
                   onClick={() => setRole('admin')}
                   className={`btn ${role === 'admin' ? 'btn-p' : 'btn-g'}`}
@@ -231,8 +227,8 @@ export default function LoginPage() {
 
             <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: 'var(--tx-2)' }}>
               Don't have an account?{' '}
-              <Link to="/signup" style={{ color: '#58a6ff', textDecoration: 'none' }}>
-                Sign Up
+              <Link to={role === 'university' ? '/signup' : '/signup?standard=1'} style={{ color: '#58a6ff', textDecoration: 'none' }}>
+                {role === 'university' ? 'Apply for university access' : 'Sign Up'}
               </Link>
             </div>
           </div>

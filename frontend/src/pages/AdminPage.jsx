@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     ShieldAlert, Plus, Trash2, Power, PowerOff, Zap, Users, BarChart3,
     Settings, Save, ToggleLeft, ToggleRight, Puzzle, Globe, UserCog,
@@ -12,6 +13,8 @@ const TABS = [
     { id: 'features', label: 'App Features', icon: <Settings size={16} /> },
     { id: 'extensions', label: 'Extensions', icon: <Puzzle size={16} /> },
     { id: 'users', label: 'User Management', icon: <Users size={16} /> },
+    { id: 'university-applications', label: 'University Applications', icon: <Globe size={16} /> },
+    { id: 'labour', label: 'Labour Sources', icon: <Globe size={16} /> },
     { id: 'interventions', label: 'Interventions', icon: <ShieldAlert size={16} /> },
 ];
 
@@ -49,34 +52,69 @@ const DEFAULT_FEATURES = {
 };
 
 export default function AdminPage() {
+    const navigate = useNavigate();
     const { role } = useStore();
     const [activeTab, setActiveTab] = useState('overview');
     const [extensions, setExtensions] = useState([]);
     const [newExt, setNewExt] = useState({ name: '', type: 'tool', description: '', command: '' });
     const [settings, setSettings] = useState({ ...DEFAULT_FEATURES });
     const [stats, setStats] = useState({});
+    const [dashboardLoading, setDashboardLoading] = useState(true);
+    const [dashboardError, setDashboardError] = useState('');
     const [users, setUsers] = useState([]);
+    const [universityApplications, setUniversityApplications] = useState([]);
+    const [universityApplicationsLoading, setUniversityApplicationsLoading] = useState(false);
+    const [universityApplicationsError, setUniversityApplicationsError] = useState('');
+    const [universityDecision, setUniversityDecision] = useState(null);
+    const [universityDecisionBusy, setUniversityDecisionBusy] = useState(false);
+    const [universityDecisionError, setUniversityDecisionError] = useState('');
+    const [labourFeeds, setLabourFeeds] = useState([]);
+    const [labourRuns, setLabourRuns] = useState([]);
+    const [newSourceFeed, setNewSourceFeed] = useState({ name: '', url: '', source_type: 'job_description', organization: '', provider: 'manual', notes: '' });
     const [saving, setSaving] = useState(false);
     const [saveMsg, setSaveMsg] = useState('');
     const [mentorQueue, setMentorQueue] = useState([]);
 
-    const loadAll = async () => {
+    const loadUniversityApplications = async () => {
+        setUniversityApplicationsLoading(true);
+        setUniversityApplicationsError('');
         try {
-            const [exts, s, st, u] = await Promise.all([
-                api.adminGetExtensions(),
-                api.adminGetSettings(),
-                api.adminGetStats(),
-                api.adminGetUsers(),
-            ]);
-            setExtensions(exts);
-            setSettings(prev => ({ ...prev, ...s }));
-            setStats(st);
-            setUsers(u);
-            
-            // Also load mentor queue for interventions tab
-            const q = await api.getMentorQueue();
-            setMentorQueue(q);
-        } catch (e) { console.error(e); }
+            const result = await api.adminGetUniversityApplications();
+            setUniversityApplications(Array.isArray(result.applications) ? result.applications : []);
+        } catch (error) {
+            setUniversityApplicationsError(error.message || 'Unable to load university applications.');
+        } finally {
+            setUniversityApplicationsLoading(false);
+        }
+    };
+
+    const loadAll = async () => {
+        loadUniversityApplications();
+        setDashboardLoading(true);
+        setDashboardError('');
+        const load = async (label, request, onSuccess) => {
+            try {
+                const result = await request();
+                onSuccess(result);
+                return null;
+            } catch (error) {
+                console.error(`[Admin Dashboard] ${label} failed:`, error);
+                return `${label}: ${error.message || 'Request failed'}`;
+            }
+        };
+
+        const results = await Promise.all([
+            load('Extensions', api.adminGetExtensions, result => setExtensions(result)),
+            load('Settings', api.adminGetSettings, result => setSettings(previous => ({ ...previous, ...result }))),
+            load('Platform stats', api.adminGetStats, result => setStats(result)),
+            load('Users', api.adminGetUsers, result => setUsers(result)),
+            load('Labour source feeds', api.getLabourSourceFeeds, result => setLabourFeeds(result.feeds || [])),
+            load('Labour source runs', api.getLabourSourceRuns, result => setLabourRuns(result.runs || [])),
+            load('Interventions', api.getMentorQueue, result => setMentorQueue(result)),
+        ]);
+        const errors = results.filter(Boolean);
+        setDashboardError(errors.join(' · '));
+        setDashboardLoading(false);
     };
 
     useEffect(() => { loadAll(); }, []);
@@ -117,6 +155,55 @@ export default function AdminPage() {
         loadAll();
     };
 
+    const handleRoleRevoke = async (userId, roleToRemove) => {
+        if (!window.confirm(`Revoke the ${roleToRemove} role from this user?`)) return;
+        try {
+            await api.adminRevokeUserRole(userId, roleToRemove);
+            await loadAll();
+        } catch (error) {
+            window.alert(error.message);
+        }
+    };
+
+    const handleUniversityDecision = async () => {
+        if (!universityDecision || universityDecisionBusy) return;
+        setUniversityDecisionBusy(true);
+        setUniversityDecisionError('');
+        try {
+            const result = await api.adminDecideUniversityApplication(universityDecision.id, universityDecision.action);
+            setSaveMsg(result.message || `University application ${universityDecision.action}d.`);
+            setUniversityDecision(null);
+            await loadUniversityApplications();
+        } catch (error) {
+            setUniversityDecisionError(error.message || 'Could not update this application.');
+        } finally {
+            setUniversityDecisionBusy(false);
+        }
+    };
+
+    const handleCreateSourceFeed = async () => {
+        if (!newSourceFeed.name) {
+            alert('Source name is required.');
+            return;
+        }
+        try {
+            await api.createLabourSourceFeed(newSourceFeed);
+            setNewSourceFeed({ name: '', url: '', source_type: 'job_description', organization: '', provider: 'manual', notes: '' });
+            await loadAll();
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
+    const handleRunSourceFeed = async (feedId) => {
+        try {
+            await api.runLabourSourceFeed(feedId, { raw_content: `Approved feed test: ${new Date().toISOString()}\nRole: Software Engineer\nRequirements: Docker, REST API, and automated testing.`, source_url: 'https://approved-feed.internal.example/preview' });
+            await loadAll();
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
     const toggleFeature = (key) => setSettings(prev => ({ ...prev, [key]: !prev[key] }));
     const setFeatureVal = (key, val) => setSettings(prev => ({ ...prev, [key]: val }));
 
@@ -126,6 +213,24 @@ export default function AdminPage() {
 
     return (
         <div style={{ display: 'flex', minHeight: 'calc(100vh - 50px)', background: '#010409' }}>
+            {universityDecision && <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: 20, background: 'rgba(0,0,0,.72)' }}>
+                <section role="dialog" aria-modal="true" aria-labelledby="university-decision-title" style={{ width: 'min(100%, 460px)', background: '#161b22', border: '1px solid #30363d', borderRadius: 14, padding: 24, boxShadow: '0 20px 70px rgba(0,0,0,.55)' }}>
+                    <h2 id="university-decision-title" style={{ margin: '0 0 10px', color: '#e6edf3', fontSize: 20 }}>{universityDecision.action === 'approve' ? 'Approve university application?' : 'Reject university application?'}</h2>
+                    <p style={{ margin: '0 0 8px', color: '#c9d1d9', fontWeight: 700 }}>{universityDecision.application.institution_name}</p>
+                    <p style={{ margin: '0 0 18px', color: '#8b949e', fontSize: 13, lineHeight: 1.6 }}>
+                        {universityDecision.action === 'approve'
+                            ? `An email containing a secure sign-up link will be sent to ${universityDecision.application.email}. The link expires in 7 days.`
+                            : `The request from ${universityDecision.application.email} will be marked rejected, and no account or institution will be created.`}
+                    </p>
+                    {universityDecisionError && <div role="alert" style={{ padding: 10, marginBottom: 14, borderRadius: 8, color: '#f85149', background: 'rgba(248,81,73,.1)', border: '1px solid rgba(248,81,73,.3)', fontSize: 12 }}>{universityDecisionError}</div>}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
+                        <button type="button" disabled={universityDecisionBusy} onClick={() => { setUniversityDecision(null); setUniversityDecisionError(''); }} style={S.ghostBtn}>Cancel</button>
+                        <button type="button" disabled={universityDecisionBusy} onClick={handleUniversityDecision} style={universityDecision.action === 'approve' ? S.greenBtn : S.dangerBtn}>
+                            {universityDecisionBusy ? 'Processing…' : universityDecision.action === 'approve' ? 'Approve & email link' : 'Reject application'}
+                        </button>
+                    </div>
+                </section>
+            </div>}
             {/* SIDEBAR */}
             <div style={{ width: 220, background: '#0d1117', borderRight: '1px solid #21262d', padding: '24px 0' }}>
                 <div style={{ padding: '0 16px 20px', borderBottom: '1px solid #21262d', marginBottom: 12 }}>
@@ -138,7 +243,10 @@ export default function AdminPage() {
                 {TABS.map(tab => (
                     <div
                         key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
+                        onClick={() => {
+                            setActiveTab(tab.id);
+                            if (tab.id === 'university-applications') loadUniversityApplications();
+                        }}
                         style={{
                             padding: '10px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
                             fontSize: 13, fontWeight: 600, margin: '2px 8px', borderRadius: 6,
@@ -158,18 +266,27 @@ export default function AdminPage() {
                 {/* ═══ OVERVIEW TAB ═══ */}
                 {activeTab === 'overview' && (
                     <div>
-                        <h2 style={S.pageTitle}>Platform Overview</h2>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-                            <StatCard label="Total Users" value={stats.totalUsers || 0} color="#58a6ff" />
-                            <StatCard label="Students" value={stats.students || 0} color="#3fb950" />
-                            <StatCard label="Mentors" value={stats.mentors || 0} color="#f2cc60" />
-                            <StatCard label="Admins" value={stats.admins || 0} color="#f85149" />
+                        {dashboardError && <div role="alert" style={{ background: 'rgba(248,81,73,0.08)', border: '1px solid rgba(248,81,73,0.3)', borderRadius: 8, padding: 12, marginBottom: 16, color: '#f85149' }}>Some dashboard data could not be loaded: {dashboardError} <button type="button" onClick={loadAll} style={{ ...S.ghostBtn, marginLeft: 8 }}>{dashboardLoading ? 'Refreshing…' : 'Retry'}</button></div>}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h2 style={{ ...S.pageTitle, margin: 0 }}>Platform Overview</h2>
+                            <button
+                                onClick={() => navigate('/labour-intelligence')}
+                                style={{ ...S.ghostBtn, display: 'flex', alignItems: 'center', gap: 6, color: '#58a6ff', borderColor: 'rgba(88,166,255,0.3)', padding: '6px 12px', fontSize: 12 }}
+                            >
+                                📊 Labour Intelligence →
+                            </button>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-                            <StatCard label="Total Projects" value={stats.totalProjects || 0} color="#a371f7" />
-                            <StatCard label="Active Projects" value={stats.activeProjects || 0} color="#3fb950" />
-                            <StatCard label="Courses" value={`${stats.activeCourses || 0}/${stats.totalCourses || 0}`} color="#58a6ff" />
-                            <StatCard label="Extensions" value={stats.extensions || 0} color="#f2cc60" />
+                            <StatCard label="Total Users" value={dashboardLoading ? '…' : stats.totalUsers ?? (dashboardError ? 'Error' : 0)} color="#58a6ff" />
+                            <StatCard label="Students" value={dashboardLoading ? '…' : stats.students ?? (dashboardError ? 'Error' : 0)} color="#3fb950" />
+                            <StatCard label="Mentors" value={dashboardLoading ? '…' : stats.mentors ?? (dashboardError ? 'Error' : 0)} color="#f2cc60" />
+                            <StatCard label="Admins" value={dashboardLoading ? '…' : stats.admins ?? (dashboardError ? 'Error' : 0)} color="#f85149" />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+                            <StatCard label="Total Projects" value={dashboardLoading ? '…' : stats.totalProjects ?? (dashboardError ? 'Error' : 0)} color="#a371f7" />
+                            <StatCard label="Active Projects" value={dashboardLoading ? '…' : stats.activeProjects ?? (dashboardError ? 'Error' : 0)} color="#3fb950" />
+                            <StatCard label="Courses" value={dashboardLoading ? '…' : `${stats.activeCourses ?? 0}/${stats.totalCourses ?? 0}`} color="#58a6ff" />
+                            <StatCard label="Extensions" value={dashboardLoading ? '…' : stats.extensions ?? (dashboardError ? 'Error' : 0)} color="#f2cc60" />
                         </div>
                         {(stats.communityPending || 0) > 0 && (
                             <div style={{ background: 'rgba(248,81,73,0.08)', border: '1px solid rgba(248,81,73,0.3)', borderRadius: 8, padding: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -298,7 +415,7 @@ export default function AdminPage() {
                 {activeTab === 'users' && (
                     <div>
                         <h2 style={S.pageTitle}>User Management</h2>
-                        <p style={{ color: '#8b949e', fontSize: 13, marginBottom: 24 }}>Manage platform users, promote to mentor/admin, or revoke access.</p>
+                        <p style={{ color: '#8b949e', fontSize: 13, marginBottom: 24 }}>Grant or revoke platform roles. Mentor and university capabilities require an explicit administrator grant; role changes are audited.</p>
                         <div style={{ background: '#0d1117', borderRadius: 8, border: '1px solid #21262d', overflow: 'hidden' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
@@ -316,7 +433,7 @@ export default function AdminPage() {
                                             <td style={S.td}>{u.name || '—'}</td>
                                             <td style={{ ...S.td, fontFamily: 'monospace', fontSize: 11 }}>{u.email}</td>
                                             <td style={S.td}>
-                                                <span style={S.badge(u.role === 'admin' ? '#f85149' : u.role === 'mentor' ? '#f2cc60' : '#3fb950')}>{u.role.toUpperCase()}</span>
+                                                {(Array.isArray(u.roles) ? u.roles : [u.role]).map(grantedRole => <span key={grantedRole} style={{ ...S.badge(grantedRole === 'admin' ? '#f85149' : grantedRole === 'mentor' || grantedRole === 'university' ? '#f2cc60' : '#3fb950'), marginRight: 5 }}>{grantedRole.toUpperCase()}</span>)}
                                             </td>
                                             <td style={S.td}>{u.skill_level || '—'}</td>
                                             <td style={S.td}>
@@ -326,15 +443,130 @@ export default function AdminPage() {
                                                     onChange={e => handleRoleChange(u.id, e.target.value)}
                                                 >
                                                     <option value="student">Student</option>
+                                                    <option value="citizen">Citizen</option>
                                                     <option value="mentor">Mentor</option>
+                                                    <option value="university">University</option>
                                                     <option value="admin">Admin</option>
                                                 </select>
+                                                <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+                                                    {(Array.isArray(u.roles) ? u.roles : [u.role]).filter(grantedRole => grantedRole !== 'student').map(grantedRole => (
+                                                        <button key={grantedRole} onClick={() => handleRoleRevoke(u.id, grantedRole)} style={{ ...S.ghostBtn, padding: '3px 7px', fontSize: 10 }}>Revoke {grantedRole}</button>
+                                                    ))}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                             {users.length === 0 && <div style={{ textAlign: 'center', color: '#484f58', padding: 32 }}>No users found.</div>}
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'university-applications' && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <h2 style={S.pageTitle}>University registration requests</h2>
+                            <button type="button" onClick={loadUniversityApplications} disabled={universityApplicationsLoading} style={S.ghostBtn}>
+                                {universityApplicationsLoading ? 'Refreshing…' : 'Refresh applications'}
+                            </button>
+                        </div>
+                        <p style={{ color: '#8b949e', fontSize: 13, marginBottom: 24 }}>Review applications. New requests remain pending until reviewed. Approval sends a single-use, seven-day sign-up link.</p>
+                        {universityApplicationsError && <div role="alert" style={{ background: 'rgba(248,81,73,0.08)', border: '1px solid rgba(248,81,73,0.3)', borderRadius: 8, padding: 12, marginBottom: 16, color: '#f85149' }}>{universityApplicationsError}</div>}
+                        <div style={{ display: 'grid', gap: 12 }}>
+                            {universityApplications.map(application => (
+                                <section key={application.id} style={{ ...S.card, display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <div>
+                                        <div style={{ color: '#e6edf3', fontWeight: 700 }}>{application.institution_name}</div>
+                                        <div style={{ color: '#8b949e', fontSize: 12, marginTop: 5 }}>{application.contact_name} · {application.email}</div>
+                                        {application.website && <a href={application.website} target="_blank" rel="noreferrer" style={{ color: '#58a6ff', fontSize: 12 }}>{application.website}</a>}
+                                        <div style={{ color: application.status === 'pending' ? '#d29922' : application.status === 'approved' ? '#3fb950' : '#f85149', fontSize: 10, textTransform: 'uppercase', marginTop: 6 }}>{application.status}</div>
+                                    </div>
+                                    {application.status === 'pending' && <div style={{ display: 'flex', gap: 8 }}>
+                                        <button onClick={() => { setUniversityDecision({ id: application.id, application, action: 'approve' }); setUniversityDecisionError(''); }} style={S.greenBtn}><CheckCircle size={14} /> Approve & email link</button>
+                                        <button onClick={() => { setUniversityDecision({ id: application.id, application, action: 'reject' }); setUniversityDecisionError(''); }} style={S.dangerBtn}><Trash2 size={14} /> Reject</button>
+                                    </div>}
+                                </section>
+                            ))}
+                            {!universityApplicationsLoading && !universityApplicationsError && universityApplications.length === 0 && <div style={{ textAlign: 'center', color: '#8b949e', padding: 32 }}>No university applications have been submitted.</div>}
+                            {universityApplicationsLoading && universityApplications.length === 0 && <div role="status" style={{ textAlign: 'center', color: '#8b949e', padding: 32 }}>Loading university applications…</div>}
+                        </div>
+                    </div>
+                )}
+
+                {/* ═══ LABOUR SOURCE GOVERNANCE TAB ═══ */}
+                {activeTab === 'labour' && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                            <div>
+                                <h2 style={{ ...S.pageTitle, margin: 0 }}>Labour Source Governance</h2>
+                                <p style={{ color: '#8b949e', fontSize: 13, marginTop: 4, marginBottom: 0 }}>Approved feeds and ingestion runs are tracked centrally so the model is fed only through governed, deduplicated sources.</p>
+                            </div>
+                            <button
+                                onClick={() => navigate('/labour-intelligence')}
+                                style={{ ...S.greenBtn, background: 'rgba(88,166,255,0.15)', borderColor: 'rgba(88,166,255,0.4)', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', fontSize: 12 }}
+                            >
+                                📊 Full Dataloka Intelligence Hub →
+                            </button>
+                        </div>
+
+                        <div style={{ ...S.card, marginBottom: 20 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 12 }}>Register Approved Source Feed</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                                <input style={S.input} placeholder="Feed name" value={newSourceFeed.name} onChange={e => setNewSourceFeed({ ...newSourceFeed, name: e.target.value })} />
+                                <select style={S.input} value={newSourceFeed.source_type} onChange={e => setNewSourceFeed({ ...newSourceFeed, source_type: e.target.value })}>
+                                    <option value="job_description">Job Description</option>
+                                    <option value="internship">Internship</option>
+                                    <option value="employer_form">Employer Form</option>
+                                    <option value="expert_input">Expert Input</option>
+                                </select>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                                <input style={S.input} placeholder="Source URL" value={newSourceFeed.url} onChange={e => setNewSourceFeed({ ...newSourceFeed, url: e.target.value })} />
+                                <input style={S.input} placeholder="Organization" value={newSourceFeed.organization} onChange={e => setNewSourceFeed({ ...newSourceFeed, organization: e.target.value })} />
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                                <select style={S.input} value={newSourceFeed.provider} onChange={e => setNewSourceFeed({ ...newSourceFeed, provider: e.target.value })}>
+                                    <option value="manual">Manual</option>
+                                    <option value="api">API</option>
+                                    <option value="rss">RSS</option>
+                                    <option value="sitemap">Sitemap</option>
+                                </select>
+                                <input style={S.input} placeholder="Cron expression (optional)" value={newSourceFeed.cron_expression || ''} onChange={e => setNewSourceFeed({ ...newSourceFeed, cron_expression: e.target.value })} />
+                            </div>
+                            <textarea style={{ ...S.input, minHeight: 80, marginBottom: 12 }} placeholder="Notes or intake rules" value={newSourceFeed.notes} onChange={e => setNewSourceFeed({ ...newSourceFeed, notes: e.target.value })} />
+                            <button onClick={handleCreateSourceFeed} style={S.greenBtn}><Plus size={14} /> Save Approved Feed</button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 }}>
+                            <div style={S.card}>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 12 }}>Approved Source Feeds</div>
+                                {labourFeeds.length === 0 ? <div style={{ color: '#8b949e' }}>No approved feeds yet.</div> : labourFeeds.map(feed => (
+                                    <div key={feed.id} style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                            <div style={{ fontWeight: 700, color: '#e6edf3' }}>{feed.name}</div>
+                                            <span style={S.badge(feed.status === 'active' ? '#3fb950' : '#f2cc60')}>{feed.status || 'draft'}</span>
+                                        </div>
+                                        <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6 }}>{feed.organization || 'Unspecified organization'} · {feed.provider || 'manual'}</div>
+                                        <div style={{ fontSize: 11, color: '#58a6ff', wordBreak: 'break-word' }}>{feed.url || 'No URL configured'}</div>
+                                        <button onClick={() => handleRunSourceFeed(feed.id)} style={{ ...S.ghostBtn, marginTop: 10 }}><Zap size={12} /> Run intake check</button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div style={S.card}>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 12 }}>Recent Ingestion Runs</div>
+                                {labourRuns.length === 0 ? <div style={{ color: '#8b949e' }}>No ingestion runs yet.</div> : labourRuns.map(run => (
+                                    <div key={run.id} style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                            <div style={{ fontWeight: 600, color: '#e6edf3' }}>{run.feed_name || 'Manual run'}</div>
+                                            <span style={S.badge(run.status === 'success' ? '#3fb950' : run.status === 'duplicate' ? '#f2cc60' : '#58a6ff')}>{run.status}</span>
+                                        </div>
+                                        <div style={{ fontSize: 11, color: '#8b949e' }}>{run.created_at}</div>
+                                        {run.summary && <div style={{ fontSize: 12, color: '#c9d1d9', marginTop: 8 }}>{run.summary}</div>}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}

@@ -27,8 +27,13 @@ function requireRole(...allowed) {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required.' });
     }
-    const userRole = (req.user.role || '').toLowerCase();
-    if (!allowedLower.includes(userRole)) {
+    let userRoles = req.user.roles || [];
+    if (typeof userRoles === 'string') {
+      try { userRoles = JSON.parse(userRoles); } catch { userRoles = []; }
+    }
+    if (!Array.isArray(userRoles)) userRoles = [];
+    const effectiveRoles = new Set([req.user.role, ...userRoles].map(role => String(role || '').toLowerCase()));
+    if (!allowedLower.some(role => effectiveRoles.has(role))) {
       return res.status(403).json({
         error: `Forbidden. Required role: ${allowed.join(' or ')}.`
       });
@@ -87,4 +92,25 @@ function requireAdoptionOwner(req, res, next) {
   return next();
 }
 
-module.exports = { requireRole, requireProblemOwner, requireAdoptionOwner };
+/**
+ * requireStudentOwner
+ * Enforces that a student can only read or mutate their own data.
+ * Admins are permitted to support any student.
+ */
+function requireStudentOwner(paramKey = 'id') {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const targetStudentId = req.params[paramKey] || req.body?.student_id;
+    if (!targetStudentId) {
+      return res.status(400).json({ error: 'Missing student identifier.' });
+    }
+    if (req.user.id === targetStudentId || req.user.role === 'admin') {
+      return next();
+    }
+    return res.status(403).json({ error: 'Forbidden: you can only access your own student record.' });
+  };
+}
+
+module.exports = { requireRole, requireProblemOwner, requireAdoptionOwner, requireStudentOwner };

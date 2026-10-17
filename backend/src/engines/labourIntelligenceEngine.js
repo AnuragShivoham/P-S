@@ -9,6 +9,7 @@
  * Layer 5: Provenance & Evidence Record Creation
  */
 
+const crypto = require('crypto');
 const db = require('../db/database');
 const { callClaudeJSON } = require('../db/claude');
 
@@ -107,6 +108,23 @@ function normalizeSkill(rawSkill, autoRegister = false, category = 'Specialized 
 /**
  * Parses raw text into segmented sections
  */
+function normalizeSignalUrl(value = '') {
+  const normalized = String(value || '').trim();
+  return normalized.length ? normalized.toLowerCase() : '';
+}
+
+function buildSignalFingerprint({ source_url = '', source_name = '', organization = '', role_title = '', raw_content = '' }) {
+  const normalized = [
+    normalizeSignalUrl(source_url),
+    (source_name || '').trim().toLowerCase(),
+    (organization || '').trim().toLowerCase(),
+    (role_title || '').trim().toLowerCase(),
+    (raw_content || '').replace(/\s+/g, ' ').trim().toLowerCase()
+  ].join('|');
+
+  return crypto.createHash('sha256').update(normalized).digest('hex');
+}
+
 function cleanAndSegmentText(rawText) {
   if (!rawText) return { cleanText: '', sections: {} };
   
@@ -297,14 +315,59 @@ Output ONLY valid JSON in this structure:
         sections: deterministicResult.sections,
         extracted: llmExtracted,
         ai_summary: aiRes.summary || '',
-        ai_extracted_count: aiRes.requirements.length
+        ai_extracted_count: aiRes.requirements.length,
+        extraction_metadata: {
+          extraction_engine: 'llm',
+          provider_status: {
+            connected: true,
+            authenticated: true,
+            fallback_active: false,
+            fallback_reason: null
+          },
+          fallback_active: false,
+          fallback_reason: null,
+          confidence_score: 0.94
+        }
       };
     }
   } catch (err) {
     console.warn('[LabourEngine] LLM extraction encountered an error, falling back to deterministic rules:', err.message);
+    return {
+      ...deterministicResult,
+      ai_summary: '',
+      ai_extracted_count: 0,
+      extraction_metadata: {
+        extraction_engine: 'deterministic_fallback',
+        provider_status: {
+          connected: false,
+          authenticated: false,
+          fallback_active: true,
+          fallback_reason: err.message
+        },
+        fallback_active: true,
+        fallback_reason: err.message,
+        confidence_score: 0.85
+      }
+    };
   }
 
-  return deterministicResult;
+  return {
+    ...deterministicResult,
+    ai_summary: '',
+    ai_extracted_count: 0,
+    extraction_metadata: {
+      extraction_engine: 'deterministic_fallback',
+      provider_status: {
+        connected: false,
+        authenticated: false,
+        fallback_active: true,
+        fallback_reason: 'LLM returned empty or invalid response'
+      },
+      fallback_active: true,
+      fallback_reason: 'LLM returned empty or invalid response',
+      confidence_score: 0.85
+    }
+  };
 }
 
 /**
@@ -319,8 +382,58 @@ async function processAndIngestSignal({
   location = 'Global / Remote',
   published_at = new Date().toISOString().split('T')[0],
   raw_content,
-  user_id = 'anon_citizen'
+  user_id = 'anon_citizen',
+  source_provenance = 'manual',
+  is_demo_seed = 0
 }) {
+  if (!source_name || !raw_content) {
+    throw new Error('source_name and raw_content are required');
+  }
+
+  const sourceHash = buildSignalFingerprint({ source_url, source_name, organization, role_title, raw_content });
+  const urlKey = normalizeSignalUrl(source_url);
+
+  const matchingUrl = urlKey
+    ? db.prepare(`
+        SELECT * FROM industry_signals
+        WHERE TRIM(source_url) != ''
+          AND LOWER(TRIM(source_url)) = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get(urlKey)
+    : null;
+
+  const matchingHash = db.prepare(`
+    SELECT * FROM industry_signals
+    WHERE source_hash IS NOT NULL
+      AND TRIM(source_hash) != ''
+      AND source_hash = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(sourceHash);
+
+  const existing = matchingUrl || matchingHash;
+
+  if (existing) {
+    const duplicateOf = existing.canonical_signal_id || existing.id;
+    const parsed = existing.parsed_content ? JSON.parse(existing.parsed_content || '{}') : {};
+    return {
+      signal_id: duplicateOf,
+      duplicate_of: duplicateOf,
+      duplicate_detected: true,
+      extracted_count: 0,
+      extracted_requirements: [],
+      ai_summary: parsed.ai_summary || '',
+      source_hash: sourceHash,
+      status: 'duplicate',
+      extraction_metadata: parsed.extraction_metadata || {
+        extraction_engine: 'deterministic_fallback',
+        fallback_active: true
+      },
+      message: 'Duplicate signal detected; canonical record retained to prevent matrix inflation.'
+    };
+  }
+
   const signalId = 'sig_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
   // Match or create canonical role
@@ -328,7 +441,7 @@ async function processAndIngestSignal({
   let canonicalRoleId = roleRow ? roleRow.id : 'software-engineer';
 
   // Run layered LLM-first extraction
-  const { sections, extracted, ai_summary } = await extractWithLLMFallback(raw_content, signalId, canonicalRoleId, source_type);
+  const { sections, extracted, ai_summary, extraction_metadata } = await extractWithLLMFallback(raw_content, signalId, canonicalRoleId, source_type);
 
   const parsedContent = JSON.stringify({
     role_title,
@@ -336,15 +449,17 @@ async function processAndIngestSignal({
     location,
     sections,
     ai_summary: ai_summary || '',
-    extracted_skills: extracted
+    extracted_skills: extracted,
+    extraction_metadata: extraction_metadata || {}
   });
 
   // Save Signal
   db.prepare(`
     INSERT INTO industry_signals (
-      id, source_type, source_name, source_url, organization, role_title, location, 
-      published_at, raw_content, parsed_content, status, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, source_type, source_name, source_url, organization, role_title, location,
+      published_at, raw_content, parsed_content, status, source_hash, canonical_signal_id,
+      is_duplicate, is_demo_seed, source_provenance, extraction_metadata, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     signalId,
     source_type,
@@ -357,6 +472,12 @@ async function processAndIngestSignal({
     raw_content,
     parsedContent,
     'processed',
+    sourceHash,
+    null,
+    0,
+    is_demo_seed ? 1 : 0,
+    source_provenance,
+    JSON.stringify(extraction_metadata || {}),
     user_id
   );
 
@@ -426,7 +547,15 @@ async function processAndIngestSignal({
     role_id: canonicalRoleId,
     extracted_count: extracted.length,
     extracted_requirements: extracted,
-    ai_summary: ai_summary || ''
+    ai_summary: ai_summary || '',
+    source_hash: sourceHash,
+    duplicate_detected: false,
+    duplicate_of: null,
+    status: 'processed',
+    extraction_metadata: extraction_metadata || {
+      extraction_engine: 'deterministic_fallback',
+      fallback_active: true
+    }
   };
 }
 
