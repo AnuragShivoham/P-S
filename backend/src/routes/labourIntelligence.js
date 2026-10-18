@@ -36,6 +36,7 @@ const {
   recordVerifiedEvidence,
   recordEmployerFeedback
 } = require('../engines/competencyGapEngine');
+const { generateStudentRoleGuidance, invalidateGuidanceCache } = require('../services/studentGuidanceService');
 
 const wrap = fn => (req, res, next) => fn(req, res, next).catch(e => {
   console.error('[Labour API Error]', e);
@@ -145,30 +146,13 @@ router.get('/student/profile', wrap(async (req, res) => {
   const userRow = db.prepare('SELECT id, name, email, skill_level, tech_stack, created_at FROM users WHERE id = ?').get(studentId);
   if (!userRow) return res.status(404).json({ error: 'User not found' });
 
-  let competencies = db.prepare(`
+  const competencies = db.prepare(`
     SELECT cp.*, s.name as skill_name, s.category as skill_category
     FROM student_competency_profiles cp
     JOIN skills_ontology s ON cp.skill_id = s.id
     WHERE cp.student_id = ?
     ORDER BY cp.updated_at DESC
   `).all(studentId);
-
-  // If student has no competency records yet, seed with baseline from tech_stack or defaults
-  if (competencies.length === 0) {
-    const defaultSkills = ['docker', 'programming', 'rest-api', 'testing'];
-    for (const sid of defaultSkills) {
-      db.prepare(`
-        INSERT OR IGNORE INTO student_competency_profiles (id, student_id, skill_id, status, proficiency_level, confidence_score)
-        VALUES (?, ?, ?, 'CLAIMED', 'beginner', 0.5)
-      `).run(`scp_${studentId}_${sid}`, studentId, sid);
-    }
-    competencies = db.prepare(`
-      SELECT cp.*, s.name as skill_name, s.category as skill_category
-      FROM student_competency_profiles cp
-      JOIN skills_ontology s ON cp.skill_id = s.id
-      WHERE cp.student_id = ?
-    `).all(studentId);
-  }
 
   const verifiedEvidence = db.prepare(`
     SELECT e.*, s.name as skill_name, p.title as project_title, rev.name as reviewer_name
@@ -204,6 +188,16 @@ router.get('/student/profile', wrap(async (req, res) => {
   });
 }));
 
+// Role-level Zero-Input guidance report for authenticated student
+router.get('/student/guidance', wrap(async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+  const studentId = req.user.id;
+  const roleId = req.query.role_id || 'software-engineering-intern';
+
+  const report = await generateStudentRoleGuidance(studentId, roleId);
+  res.json(report);
+}));
+
 // Evaluate gap for authenticated student against a target skill/role
 router.post('/student/gap-analysis', wrap(async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
@@ -235,6 +229,7 @@ router.post('/student/upgrade-project', wrap(async (req, res) => {
 
   const upgradePlan = await generateProjectUpgradePlan(project_id, target_skill_id, target_requirement_id);
   const result = applyProjectUpgrade(studentId, project_id, upgradePlan, target_requirement_id);
+  invalidateGuidanceCache(studentId);
 
   res.json({
     success: true,

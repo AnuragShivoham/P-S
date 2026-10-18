@@ -278,6 +278,7 @@ export const api = {
   getLabourProviderHealth: () => get('/labour/health/provider'),
   getMarketTrends: (roleId) => get(roleId ? `/labour/market/trends?role_id=${encodeURIComponent(roleId)}` : '/labour/market/trends'),
   getStudentLabourProfile: () => get('/labour/student/profile'),
+  getStudentGuidance: (roleId) => get(roleId ? `/labour/student/guidance?role_id=${encodeURIComponent(roleId)}` : '/labour/student/guidance'),
   analyzeStudentGap: (data) => post('/labour/student/gap-analysis', data),
   upgradeStudentProject: (data) => post('/labour/student/upgrade-project', data),
   getInstitutionLabourAnalytics: () => get('/labour/institution/analytics'),

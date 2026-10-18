@@ -44,7 +44,8 @@ workspace/**
 
 # Test files
 test*.js
-backend/test*
+backend/test*.js
+!backend/tests/**
 backend/tmp_check.js
 
 # Data
